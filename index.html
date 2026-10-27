@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en" data-theme="midnight">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>GODS TRADER</title>
+<meta name="theme-color" content="#0a0d12">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="GODS">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="top">
+<div class="brand"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18" stroke="currentColor" stroke-width="1.4"/><rect x="8.5" y="7" width="7" height="9" rx="1.5" fill="#3ddc97"/></svg>GODS TRADER</div>
+<span class="pill">Demo money only</span>
+</header>
+<section class="hero">
+<div>
+<p class="lbl">Virtual equity</p>
+<div class="big" id="eq">$10,000.00</div>
+<p class="sub">Session <span id="pl">+$0.00</span> &nbsp; Projected <span id="proj">+$0.00</span></p>
+</div>
+<canvas id="spark" aria-hidden="true"></canvas>
+</section>
+<nav class="tabs" role="tablist">
+<button class="on" data-t="trade">Trade</button>
+<button data-t="auto">Auto</button>
+<button data-t="analytics">Analytics</button>
+<button data-t="market">Market</button>
+<button data-t="settings">Settings</button>
+</nav>
+<main>
+<section class="panel on" id="p-trade"><div class="grid">
+<div class="card chart">
+<button class="dbtn" id="dbtn" aria-label="Deriv API">+</button>
+<canvas id="chart"></canvas>
+<div class="tip" id="tip"></div>
+</div>
+<div class="card">
+<div class="row between"><span class="lbl">Stake, virtual USD</span><span class="lbl" id="risk"></span></div>
+<div class="row"><button data-step="-1" aria-label="Lower stake">&minus;</button><input type="number" data-k="stake" min="0.5" step="0.5" aria-label="Stake"><button data-step="1" aria-label="Raise stake">+</button></div>
+<div class="row chips"><button data-set="1">1</button><button data-set="5">5</button><button data-set="10">10</button><button data-set="25">25</button><button data-set="50">50</button></div>
+<label>Expiry</label>
+<select data-k="dur"><option value="3">3 ticks</option><option value="5">5 ticks</option><option value="10">10 ticks</option><option value="20">20 ticks</option></select>
+<div class="row sides"><button class="side up" id="upb">Rise</button><button class="side dn" id="dnb">Fall</button></div>
+<p class="lbl">Open positions</p>
+<div id="pos"></div>
+</div>
+</div></section>
+<section class="panel" id="p-auto"><div class="card">
+<label>Strategy</label>
+<select data-k="strat"><option value="trend">Trend, 5 vs 20 average</option><option value="rsi">Reversal, RSI 14</option><option value="brk">Breakout, 10 candles</option></select>
+<label class="chk"><input type="checkbox" data-k="autoSel"> Pick the best strategy from its own results, once each has 30 trades</label>
+<label class="chk"><input type="checkbox" data-k="autoOn"> Auto trading on</label>
+<p class="lbl">Auto uses the stake from the Trade tab, obeys every risk limit, and holds one position at a time.</p>
+<div class="log" id="alog"></div>
+</div></section>
+<section class="panel" id="p-analytics">
+<div class="card"><div class="row between"><span class="lbl">Equity curve</span><span class="lbl" id="eqv"></span></div><canvas id="eqc"></canvas>
+<div class="stats" id="stats"></div></div>
+<div class="card"><table id="hist"></table></div>
+</section>
+<section class="panel" id="p-market"><div class="grid">
+<div class="card">
+<label>Market regime</label>
+<select data-k="regime"><option value="auto">Auto, changes on its own</option><option value="up">Steady uptrend</option><option value="down">Steady downtrend</option><option value="range">Choppy range</option><option value="crash">Sharp sell-off</option><option value="spike">Fast spikes</option></select>
+<label>Volatility <span id="vv"></span></label><input type="range" min="0.2" max="3" step="0.1" data-k="vol">
+<label>Drift</label><input type="range" min="-1" max="1" step="0.05" data-k="drift">
+<label>Ticks per second</label><input type="range" min="1" max="12" step="1" data-k="speed">
+<label>Ticks per candle</label><input type="range" min="5" max="60" step="1" data-k="tpc">
+<div class="row"><button id="shock">News shock</button></div>
+</div>
+<div class="card">
+<label>Embedded real chart, third-party</label>
+<select id="tvsym"><option value="FX:EURUSD">EUR/USD</option><option value="BITSTAMP:BTCUSD">BTC/USD</option><option value="TVC:GOLD">Gold</option></select>
+<iframe id="tv" title="Embedded market chart" loading="lazy" style="width:100%;height:340px;border:0;border-radius:12px;margin-top:8px" src="https://s.tradingview.com/widgetembed/?symbol=FX%3AEURUSD&interval=15&theme=dark&style=1&locale=en"></iframe>
+</div>
+</div></section>
+<section class="panel" id="p-settings"><div class="grid">
+<div class="card">
+<p class="lbl">Risk limits</p>
+<label>Max stake per trade</label><input type="number" data-k="maxStake" min="1">
+<label>Max share of balance per trade, %</label><input type="number" data-k="riskPct" min="0.1" max="10" step="0.1">
+<label>Max open positions</label><input type="number" data-k="maxOpen" min="1" max="10">
+<label>Daily loss limit</label><input type="number" data-k="dailyLoss" min="10">
+</div>
+<div class="card">
+<p class="lbl">Theme</p>
+<div class="row chips"><button data-theme-set="midnight">Midnight</button><button data-theme-set="paper">Paper</button><button data-theme-set="neon">Neon</button><button data-theme-set="sunset">Sunset</button></div>
+<p class="lbl">App</p>
+<div class="row"><button id="openGuide">Add to Home Screen</button><button id="inst" hidden>Install app</button><button id="wipe">Reset demo</button></div>
+<p class="lbl">Demo only. Simulated results are not a forecast or financial advice. Automated trading can lose money.</p>
+</div>
+</div></section>
+</main>
+
+<dialog id="dmod">
+<div class="row between"><span class="lbl">Deriv API</span><button id="dx">Close</button></div>
+<label>Name, up to 32 characters</label><input id="dname" maxlength="32" value="Deriv">
+<label>Account type</label><select id="denv"><option value="demo">Demo account</option><option value="test">Test account</option></select>
+<label>API token</label>
+<div class="row"><input id="dtok" type="password" autocomplete="off" spellcheck="false" placeholder="Paste token here"><button id="dshow">Show</button></div>
+<p class="lbl">Get a token at app.deriv.com/account/api-token. Create a demo or test token, copy it, and paste it above. Use a demo or test token only. The token stays in this tab's memory, is never saved to disk, and is cleared after you press Run.</p>
+<div class="row"><button class="go" id="drun">Run</button><button id="dstop">Stop</button></div>
+<p class="lbl" id="dmsg"></p>
+<p class="lbl">Status: <i class="dot ok"></i> live &nbsp; <i class="dot limit"></i> rate limited &nbsp; <i class="dot down"></i> unavailable</p>
+</dialog>
+
+<dialog id="guide">
+<p class="lbl">Home Screen app</p>
+<p class="txt">GODS TRADER doesn't have an official app yet. Add it to your Home Screen and it opens full screen with its own icon, just like an app.</p>
+<p class="lbl">iPhone or iPad, Safari</p>
+<ol class="steps">
+<li>Tap the Share button <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3M8 7l4-4 4 4M6 11H5v10h14V11h-1" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></li>
+<li>Scroll and tap Add to Home Screen <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 8v8M8 12h8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></li>
+<li>Tap Add in the top-right corner.</li>
+</ol>
+<p class="lbl">Android, Chrome</p>
+<ol class="steps"><li>Tap the three-dot menu.</li><li>Tap Install app or Add to Home screen.</li></ol>
+<p class="lbl">Computer, Chrome or Edge</p>
+<p class="txt">Click the install icon at the right of the address bar.</p>
+<div class="row"><button id="gx" class="go">Got it</button></div>
+</dialog>
+
+<div class="toast" id="toast" role="status"></div>
+<script src="deriv.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
