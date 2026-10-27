@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en" data-theme="midnight">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Krabby</title>
+<meta name="theme-color" content="#0a0d12">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Krabby">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" href="logo.png" type="image/png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <img src="logo.png" alt="" width="22" height="22" style="border-radius:6px;vertical-align:middle;margin-right:6px">
+    KRABBY
+  </div>
+  <span class="pill" id="modepill">Demo money only</span>
+</header>
+
+<section class="hero">
+  <div>
+    <p class="lbl">Virtual equity</p>
+    <div class="big" id="eq">$10,000.00</div>
+    <p class="sub">Session <span id="pl">+$0.00</span> &nbsp; Projected <span id="proj">+$0.00</span></p>
+    <p class="sub" id="feedline">Demo market, practice prices</p>
+  </div>
+  <canvas id="spark" aria-hidden="true"></canvas>
+</section>
+
+<nav class="tabs">
+  <button class="on" data-t="trade">Trade</button>
+  <button data-t="auto">Auto</button>
+  <button data-t="analytics">Analytics</button>
+  <button data-t="market">Markets</button>
+  <button data-t="settings">Settings</button>
+</nav>
+
+<main>
+<section class="panel on" id="p-trade">
+  <div class="grid">
+    <div class="card">
+      <div class="bar">
+        <button class="dbtn" id="dbtn" aria-label="Deriv API">⚡ API</button>
+        <select id="src" aria-label="Chart source">
+          <option value="demo">Demo market</option>
+          <option value="live">Live market</option>
+          <option value="tv">Embedded chart</option>
+        </select>
+        <select id="prod" aria-label="Live coin" hidden>
+          <option value="BTC-USD">BTC</option>
+          <option value="ETH-USD">ETH</option>
+          <option value="SOL-USD">SOL</option>
+          <option value="XRP-USD">XRP</option>
+          <option value="DOGE-USD">DOGE</option>
+        </select>
+      </div>
+      <div class="tools">
+        <button id="zout" aria-label="Zoom out">−</button>
+        <button id="zin" aria-label="Zoom in">+</button>
+        <button id="yauto">Auto scale: on</button>
+        <button id="yz">Y +</button>
+        <button id="yzo">Y −</button>
+        <button id="latest">Latest</button>
+        <select id="gran" aria-label="Candle size" hidden>
+          <option value="60">1m</option>
+          <option value="300">5m</option>
+          <option value="900">15m</option>
+          <option value="3600">1h</option>
+        </select>
+      </div>
+      <div class="chartbox">
+        <canvas id="chart"></canvas>
+        <div class="tip" id="tip"></div>
+      </div>
+      <iframe id="tvT" title="Embedded chart" loading="lazy" hidden></iframe>
+    </div>
+
+    <div class="card">
+      <!-- Trade type selector -->
+      <div class="ttabs">
+        <button data-tt="options" class="on">Options</button>
+        <button data-tt="cfd">CFD</button>
+        <button data-tt="mult">Multiplier</button>
+        <button data-tt="accu">Accumulator</button>
+      </div>
+
+      <div id="panel-options">
+        <div class="row between">
+          <span class="lbl">Stake, virtual USD</span>
+          <span class="lbl" id="risk"></span>
+        </div>
+        <div class="row">
+          <button data-step="-1" aria-label="Lower stake">−</button>
+          <input type="number" data-k="stake" min="0.35" step="0.35" aria-label="Stake">
+          <button data-step="1" aria-label="Raise stake">+</button>
+        </div>
+        <div class="row chips">
+          <button data-set="1">1</button>
+          <button data-set="5">5</button>
+          <button data-set="10">10</button>
+          <button data-set="25">25</button>
+          <button data-set="50">50</button>
+        </div>
+        <label>Expiry</label>
+        <select data-k="dur" id="durD">
+          <option value="3">3 ticks</option>
+          <option value="5">5 ticks</option>
+          <option value="10">10 ticks</option>
+          <option value="20">20 ticks</option>
+        </select>
+        <select data-k="durL" id="durL" hidden>
+          <option value="15">15 seconds</option>
+          <option value="30">30 seconds</option>
+          <option value="60">1 minute</option>
+          <option value="300">5 minutes</option>
+        </select>
+        <div class="row sides">
+          <button class="side up" id="upb">Rise</button>
+          <button class="side dn" id="dnb">Fall</button>
+        </div>
+      </div>
+
+      <div id="panel-cfd" hidden>
+        <label>Volume (lots)</label>
+        <div class="row">
+          <button data-vstep="-0.01">−</button>
+          <input type="number" id="vol" value="0.01" min="0.01" step="0.01">
+          <button data-vstep="0.01">+</button>
+        </div>
+        <div class="row sides">
+          <button class="side up" id="cfd-buy">Buy</button>
+          <button class="side dn" id="cfd-sell">Sell</button>
+        </div>
+      </div>
+
+      <div id="panel-mult" hidden>
+        <label>Stake</label>
+        <input type="number" id="mstake" value="10" min="1">
+        <label>Multiplier</label>
+        <select id="mval">
+          <option value="50">x50</option>
+          <option value="100" selected>x100</option>
+          <option value="200">x200</option>
+          <option value="500">x500</option>
+        </select>
+        <div class="row sides">
+          <button class="side up" id="m-up">Up</button>
+          <button class="side dn" id="m-dn">Down</button>
+        </div>
+      </div>
+
+      <div id="panel-accu" hidden>
+        <label>Stake</label>
+        <input type="number" id="astake" value="5" min="1">
+        <label>Growth rate</label>
+        <select id="agrow">
+          <option value="0.01">1%</option>
+          <option value="0.02" selected>2%</option>
+          <option value="0.03">3%</option>
+          <option value="0.05">5%</option>
+        </select>
+        <div class="row sides">
+          <button class="side up" id="a-buy">Buy</button>
+          <button class="side dn" id="a-sell">Sell</button>
+        </div>
+      </div>
+
+      <p class="lbl">Open positions</p>
+      <div id="pos"></div>
+    </div>
+  </div>
+</section>
+
+<section class="panel" id="p-auto">
+  <div class="card">
+    <label>Strategy</label>
+    <select data-k="strat">
+      <option value="trend">Trend, 5 vs 20 average</option>
+      <option value="rsi">Reversal, RSI 14</option>
+      <option value="brk">Breakout, 10 candles</option>
+    </select>
+    <label class="chk"><input type="checkbox" data-k="autoSel"> Pick the best strategy from its own results, once each has 30 trades</label>
+    <label class="chk"><input type="checkbox" data-k="autoOn"> Auto trading on</label>
+    <p class="lbl">Auto uses the stake from the Trade tab, obeys every risk limit, works on whichever market is selected, and holds one position at a time.</p>
+    <div class="log" id="alog"></div>
+  </div>
+</section>
+
+<section class="panel" id="p-analytics">
+  <div class="card">
+    <div id="stats" class="stats"></div>
+    <div class="tablewrap"><table id="hist"></table></div>
+  </div>
+  <div class="card">
+    <p class="lbl">Equity curve</p>
+    <canvas id="eqc" height="140"></canvas>
+    <p class="lbl" id="eqv"></p>
+  </div>
+</section>
+
+<section class="panel" id="p-market">
+  <div class="card">
+    <div id="cstats" class="stats"></div>
+    <p class="lbl">Last price <span id="cpx">—</span> <span id="cch"></span></p>
+    <p class="lbl" id="fst"></p>
+    <div id="tape" class="tape"></div>
+  </div>
+</section>
+
+<section class="panel" id="p-settings">
+  <div class="card">
+    <label>Theme</label>
+    <select data-k="theme">
+      <option value="midnight">Midnight</option>
+      <option value="paper">Paper</option>
+      <option value="neon">Neon</option>
+      <option value="sunset">Sunset</option>
+    </select>
+    <label>Max stake</label>
+    <input type="number" data-k="maxStake" min="1" step="1">
+    <label>Max open positions</label>
+    <input type="number" data-k="maxOpen" min="1" max="20" step="1">
+    <label>Risk % of balance</label>
+    <input type="number" data-k="riskPct" min="0.5" max="20" step="0.5">
+    <label>Daily loss limit (USD)</label>
+    <input type="number" data-k="dailyLoss" min="10" step="10">
+    <label>Demo regime</label>
+    <select data-k="regime">
+      <option value="auto">Auto</option>
+      <option value="up">Up</option>
+      <option value="down">Down</option>
+      <option value="range">Range</option>
+      <option value="crash">Crash</option>
+      <option value="spike">Spike</option>
+    </select>
+    <label>Volatility</label>
+    <input type="range" data-k="vol" min="0.3" max="3" step="0.1">
+    <label>Speed (ticks per candle)</label>
+    <input type="range" data-k="tpc" min="4" max="40" step="1">
+    <p class="lbl" style="margin-top:16px">Krabby – demo terminal. Virtual money only. Not financial advice.</p>
+  </div>
+</section>
+</main>
+
+<!-- Deriv API Modal -->
+<div class="modal" id="dmodal" hidden>
+  <div class="mbox">
+    <div class="mhead">
+      <strong>Deriv API</strong>
+      <button id="dclose" aria-label="Close">✕</button>
+    </div>
+    <div class="mbody">
+      <div class="status-row">
+        <span><i class="dot" id="ddot"></i> <span id="dstat">Off</span></span>
+        <span>Balance: <strong id="dbal">—</strong></span>
+      </div>
+      <label>API Token (Demo)</label>
+      <input type="password" id="dtoken" placeholder="Paste demo token" autocomplete="off">
+      <div id="dcheck" class="lbl" style="min-height:18px"></div>
+      <label>App ID</label>
+      <input type="number" id="dapp" value="1089">
+      <div class="macts">
+        <button class="primary" id="drun">Connect</button>
+        <button id="dstop">Stop</button>
+      </div>
+      <p class="lbl">Create a free Demo token at app.deriv.com → Settings → API token (enable Read + Trade). Works on GitHub Pages.</p>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status"></div>
+
+<script src="deriv.js"></script>
+<script src="live.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
