@@ -1,0 +1,13 @@
+{
+  "name": "krabby",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Krabby static trading terminal. Test scripts only; the site itself has no build step and no runtime npm dependencies.",
+  "type": "module",
+  "scripts": {
+    "test:unit": "node tests/unit.mjs",
+    "test:mock": "node tests/mock-deriv.mjs --port 8787",
+    "test:smoke": "node tests/smoke.mjs",
+    "test": "node tests/unit.mjs && node tests/smoke.mjs"
+  }
+}

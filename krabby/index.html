@@ -1,0 +1,660 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#090d13">
+  <meta name="description" content="SimpleXEngine [BOT] — Deriv trading terminal. Machine learning, 14 engines, 30+ markets. Demo mode default. Real money locked. No profit guaranteed.">
+  <title>Krabby · SimpleXEngine [BOT]</title>
+  <link rel="icon" href="assets/krabby-logo.jpg" type="image/jpeg">
+  <link rel="apple-touch-icon" href="assets/krabby-logo.jpg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+<!-- ══ Loading Screen ══════════════════════════════════════════════════════ -->
+<div id="loading-screen">
+  <img class="loading-logo" src="assets/krabby-logo.jpg" alt="SimpleXEngine">
+  <div style="text-align:center">
+    <div style="font-size:1.2rem;font-weight:700;letter-spacing:-.02em;margin-bottom:4px;background:linear-gradient(135deg,#14b8a6,#38bdf8);-webkit-background-clip:text;background-clip:text;color:transparent">
+      SimpleXEngine <span style="font-size:.7em;opacity:.7">[BOT]</span>
+    </div>
+    <div style="font-size:.75rem;color:var(--muted)">Initialising engines…</div>
+  </div>
+  <div class="loading-bar"><div class="loading-bar-fill"></div></div>
+</div>
+
+<!-- ══ Toast area ══════════════════════════════════════════════════════════ -->
+<div id="toast-area"></div>
+
+<!-- ══ Backdrop (mobile) ═══════════════════════════════════════════════════ -->
+<div class="backdrop"></div>
+
+<!-- ══ Consent banner ══════════════════════════════════════════════════════ -->
+<div id="consent-banner" class="hidden">
+  <p>
+    <strong>SimpleXEngine stores nothing by default.</strong>
+    Accept cookies to save your settings, candle history and trade log on this device.
+    You can withdraw consent at any time under Settings → Data.
+  </p>
+  <div class="consent-btns">
+    <button id="consent-decline" class="btn btn-secondary btn-sm">Decline</button>
+    <button id="consent-accept"  class="btn btn-primary  btn-sm">Accept &amp; Save</button>
+  </div>
+</div>
+
+<!-- ══ Top bar ══════════════════════════════════════════════════════════════ -->
+<header class="topbar">
+  <div class="brand">
+    <button class="icon-btn mobile-menu-btn" id="mobile-menu-btn" aria-label="Menu">☰</button>
+    <img class="brand-logo" src="assets/krabby-logo.jpg" alt="Krabby">
+    <span class="brand-name">SimpleXEngine</span>
+    <span class="brand-tag">[BOT]</span>
+  </div>
+
+  <div id="topbar-markets" class="topbar-markets"></div>
+
+  <div class="topbar-right">
+    <div class="conn-badge paper" id="conn-badge">
+      <span class="conn-dot"></span>
+      <span id="conn-label">Paper</span>
+    </div>
+    <div class="run-indicator" id="run-indicator">
+      <span class="run-dot"></span>
+      Stopped
+    </div>
+    <button class="icon-btn" title="Settings" onclick="app.navigate('settings')">⚙</button>
+  </div>
+</header>
+
+<!-- ══ App shell ════════════════════════════════════════════════════════════ -->
+<div id="app">
+
+  <!-- ── Sidebar ───────────────────────────────────────────────────────── -->
+  <nav class="sidebar">
+    <div class="mode-bar" id="mode-bar">
+      <span style="font-size:.85rem">📄</span>
+      <span style="font-size:.72rem;color:var(--muted2)">Paper mode — demo safe</span>
+    </div>
+
+    <div class="sidebar-section">Trading</div>
+    <div class="nav-item" data-view="dashboard"><span class="nav-icon">📊</span>Dashboard</div>
+    <div class="nav-item" data-view="trading">
+      <span class="nav-icon">⚡</span>Trading
+      <span class="nav-badge" id="positions-badge" style="display:none">0</span>
+    </div>
+    <div class="nav-item" data-view="markets"><span class="nav-icon">🌐</span>Markets</div>
+    <div class="nav-item" data-view="chart"><span class="nav-icon">📈</span>Chart</div>
+
+    <div class="sidebar-section">Intelligence</div>
+    <div class="nav-item" data-view="engines"><span class="nav-icon">🧠</span>Engines</div>
+    <div class="nav-item" data-view="lab"><span class="nav-icon">🔬</span>Lab &amp; Backtest</div>
+    <div class="nav-item" data-view="learning">
+      <span class="nav-icon">🤖</span>Learning
+      <span class="nav-badge warn" id="proposals-badge" style="display:none">0</span>
+    </div>
+
+    <div class="sidebar-section">System</div>
+    <div class="nav-item" data-view="broker"><span class="nav-icon">🔗</span>Broker</div>
+    <div class="nav-item" data-view="settings"><span class="nav-icon">⚙</span>Settings</div>
+    <div class="nav-item" data-view="about"><span class="nav-icon">ℹ</span>About &amp; Risk</div>
+
+    <div class="sidebar-footer">
+      <div class="balance-display">
+        <div class="balance-label">Usable Balance</div>
+        <div class="balance-amount" id="sidebar-balance">$5.00</div>
+        <div class="balance-subtext">$5 cap · paper mode</div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ── Main content ──────────────────────────────────────────────────── -->
+  <main class="main">
+
+    <!-- ═══ DASHBOARD ═════════════════════════════════════════════════════ -->
+    <div class="view" id="view-dashboard">
+      <div>
+        <div class="view-title"><span class="view-icon">📊</span> Dashboard</div>
+        <div class="view-subtitle">SimpleXEngine [BOT] — live paper-trading session</div>
+      </div>
+
+      <!-- Stats strip -->
+      <div class="stats-strip">
+        <div class="stat-card" style="--accent-color:#22c55e">
+          <div class="stat-label">Session P&amp;L</div>
+          <div class="stat-value up" id="stat-pnl">+$0.00</div>
+          <div class="stat-delta" id="stat-pnl-delta">This session</div>
+        </div>
+        <div class="stat-card" style="--accent-color:#14b8a6">
+          <div class="stat-label">Balance</div>
+          <div class="stat-value accent" id="stat-balance">$5.00</div>
+          <div class="stat-delta">$5 cap active</div>
+        </div>
+        <div class="stat-card" style="--accent-color:#3b82f6">
+          <div class="stat-label">Total Trades</div>
+          <div class="stat-value" id="stat-trades">0</div>
+          <div class="stat-delta" id="stat-winrate-delta">Win rate —</div>
+        </div>
+        <div class="stat-card" style="--accent-color:#f59e0b">
+          <div class="stat-label">Win Rate</div>
+          <div class="stat-value" id="stat-winrate">—</div>
+          <div class="stat-delta">Last 100 trades</div>
+        </div>
+        <div class="stat-card" style="--accent-color:#8b5cf6">
+          <div class="stat-label">Open Positions</div>
+          <div class="stat-value" id="stat-positions">0</div>
+          <div class="stat-delta" id="stat-mode">paper mode</div>
+        </div>
+        <div class="stat-card" style="--accent-color:#ef4444">
+          <div class="stat-label">Mode</div>
+          <div class="stat-value" style="font-size:.9rem" id="stat-mode">PAPER</div>
+          <div class="stat-delta">Demo &amp; real locked</div>
+        </div>
+      </div>
+
+      <!-- Equity sparkline strip -->
+      <div class="equity-strip panel">
+        <span class="strip-label">Equity curve</span>
+        <canvas id="equity-sparkline" height="40"></canvas>
+      </div>
+
+      <!-- Run controls -->
+      <div class="panel" style="padding:16px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+        <div>
+          <div style="font-size:.85rem;font-weight:600;color:var(--text)">Bot Control</div>
+          <div style="font-size:.72rem;color:var(--muted);margin-top:2px">Paper trading — no real money at risk</div>
+        </div>
+        <div style="display:flex;gap:8px;margin-left:auto;flex-wrap:wrap">
+          <button class="btn btn-primary btn-sm" id="btn-run" onclick="app.toggleBot()">▶ Start Bot</button>
+          <button class="btn btn-secondary btn-sm" onclick="app.navigate('settings')">⚙ Settings</button>
+          <button class="btn btn-secondary btn-sm" onclick="app.navigate('lab')">🔬 Backtest</button>
+        </div>
+      </div>
+
+      <!-- Recent trades -->
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">Recent Trades (Paper)</span>
+          <div class="panel-actions">
+            <span class="badge badge-muted">Session</span>
+          </div>
+        </div>
+        <div class="panel-body scroll-y" style="max-height:280px">
+          <table class="data-table">
+            <thead><tr>
+              <th>Time</th><th>Asset</th><th>Side</th><th>Net P&amp;L</th><th>Mode</th>
+            </tr></thead>
+            <tbody id="trades-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ TRADING ════════════════════════════════════════════════════════ -->
+    <div class="view" id="view-trading">
+      <div>
+        <div class="view-title"><span class="view-icon">⚡</span> Trading</div>
+        <div class="view-subtitle">Open positions and pending orders — paper mode</div>
+      </div>
+      <div class="panel">
+        <div class="panel-header"><span class="panel-title">Open Positions</span></div>
+        <div class="panel-body">
+          <div class="empty-state">
+            <div class="empty-icon">⚡</div>
+            No open positions. Start the bot or place a manual order.
+          </div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-header"><span class="panel-title">Pending Orders</span></div>
+        <div class="panel-body">
+          <div class="empty-state"><div class="empty-icon">🕐</div>No pending orders.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ MARKETS ════════════════════════════════════════════════════════ -->
+    <div class="view" id="view-markets">
+      <div>
+        <div class="view-title"><span class="view-icon">🌐</span> Markets</div>
+        <div class="view-subtitle">30+ live-price markets — simulated ticks · connect Deriv for real prices</div>
+      </div>
+      <div id="markets-container"></div>
+    </div>
+
+    <!-- ═══ CHART ═══════════════════════════════════════════════════════════ -->
+    <div class="view" id="view-chart">
+      <div>
+        <div class="view-title"><span class="view-icon">📈</span> Chart</div>
+        <div class="view-subtitle">Candlestick chart powered by Lightweight Charts™</div>
+      </div>
+      <div class="chart-panel" style="min-height:420px">
+        <div class="chart-toolbar">
+          <span class="chart-title" id="chart-asset-label">R_100 — Volatility 100 Index</span>
+          <div class="tf-tabs">
+            <button class="tf-tab active" data-tf="60">1m</button>
+            <button class="tf-tab" data-tf="300">5m</button>
+            <button class="tf-tab" data-tf="900">15m</button>
+            <button class="tf-tab" data-tf="3600">1H</button>
+            <button class="tf-tab" data-tf="14400">4H</button>
+          </div>
+          <div style="display:flex;gap:6px;margin-left:auto">
+            <button class="btn btn-secondary btn-xs" id="chart-load-history">Load history</button>
+          </div>
+        </div>
+        <div class="chart-area">
+          <div id="main-chart"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ ENGINES ════════════════════════════════════════════════════════ -->
+    <div class="view" id="view-engines">
+      <div>
+        <div class="view-title"><span class="view-icon">🧠</span> Engines</div>
+        <div class="view-subtitle">14-engine analysis pipeline — processing every bar in real time</div>
+      </div>
+
+      <!-- Engine stats -->
+      <div class="stats-strip" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr))">
+        <div class="stat-card"><div class="stat-label">Active Engines</div><div class="stat-value accent">14</div></div>
+        <div class="stat-card"><div class="stat-label">Analysis Speed</div><div class="stat-value accent">3.2ms</div><div class="stat-delta">per bar (after 2.7× opt.)</div></div>
+        <div class="stat-card"><div class="stat-label">Backtest Runs</div><div class="stat-value">150</div><div class="stat-delta">5 market profiles</div></div>
+        <div class="stat-card"><div class="stat-label">False-Alarm Rate</div><div class="stat-value down">~7%</div><div class="stat-delta">scanner BH-FDR controlled</div></div>
+      </div>
+
+      <div id="engines-container"></div>
+    </div>
+
+    <!-- ═══ LAB & BACKTEST ═════════════════════════════════════════════════ -->
+    <div class="view" id="view-lab">
+      <div>
+        <div class="view-title"><span class="view-icon">🔬</span> Lab &amp; Backtest</div>
+        <div class="view-subtitle">Strategy editor, backtester, scanner and rule book</div>
+      </div>
+
+      <div class="tabs">
+        <button class="tab active" data-tab="backtest">Backtest</button>
+        <button class="tab" data-tab="scanner">Scanner</button>
+        <button class="tab" data-tab="editor">Strategy Editor</button>
+        <button class="tab" data-tab="rulebook">Rule Book</button>
+      </div>
+
+      <div id="lab-tab-backtest">
+        <div class="panel" style="padding:18px">
+          <div style="font-size:.88rem;font-weight:600;color:var(--text);margin-bottom:14px">Run a Backtest</div>
+          <div class="form-grid" style="gap:14px;margin-bottom:14px">
+            <div class="form-row">
+              <label class="form-label">Asset</label>
+              <select class="form-select" id="bt-asset">
+                <option value="R_100">R_100 — Volatility 100</option>
+                <option value="R_50">R_50 — Volatility 50</option>
+                <option value="R_75">R_75 — Volatility 75</option>
+                <option value="frxXAUUSD">XAU/USD — Gold</option>
+                <option value="cryBTCUSD">BTC/USD — Bitcoin</option>
+                <option value="frxEURUSD">EUR/USD — Euro</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <label class="form-label">Timeframe</label>
+              <select class="form-select" id="bt-tf">
+                <option value="60">M1 (1 minute)</option>
+                <option value="300">M5 (5 minutes)</option>
+                <option value="900">M15 (15 minutes)</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <label class="form-label">Market type</label>
+              <select class="form-select" id="bt-kind">
+                <option value="random_walk">Random walk (Deriv synthetic)</option>
+                <option value="regimes">Structured (trends + ranges)</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <label class="form-label">Bars per run</label>
+              <input class="form-input" id="bt-bars" type="number" value="1200" min="400" max="20000">
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button class="btn btn-primary" id="btn-backtest">▶ Run Backtest</button>
+            <button class="btn btn-secondary" id="btn-cancel-bt" style="display:none">✕ Cancel</button>
+            <div class="scanner-status" id="bt-status"></div>
+          </div>
+          <div class="progress-bar" id="bt-progress-bar" style="display:none"><div class="progress-fill" id="bt-progress-fill" style="width:0%"></div></div>
+          <div id="bt-result" style="margin-top:14px"></div>
+        </div>
+      </div>
+
+      <div id="lab-tab-scanner" style="display:none">
+        <div class="panel" style="padding:18px">
+          <div style="font-size:.88rem;font-weight:600;color:var(--text);margin-bottom:8px">Condition Scanner</div>
+          <div style="font-size:.78rem;color:var(--muted);margin-bottom:14px">
+            Tests thousands of engine-output conditions against the trade history.
+            Uses Benjamini–Hochberg FDR control. Finding a rule here is rare and not a guarantee.
+          </div>
+          <button class="btn btn-primary btn-sm" id="btn-scan">▶ Start Scan</button>
+          <div id="scan-result" style="margin-top:14px"></div>
+        </div>
+      </div>
+
+      <div id="lab-tab-editor" style="display:none">
+        <div class="panel" style="padding:18px">
+          <div style="font-size:.88rem;font-weight:600;color:var(--text);margin-bottom:8px">Strategy Editor</div>
+          <div style="font-size:.78rem;color:var(--muted);margin-bottom:10px">
+            Write a strategy in JavaScript. It runs in a sandbox — not a security boundary.
+            Use <code>signals(bar)</code> to return buy/sell signals.
+          </div>
+          <textarea class="strategy-editor" id="strategy-code" spellcheck="false">// Return an array of signals for the current bar.
+// bar: { open, high, low, close, epoch, signals }
+// signals is an array of engine outputs for this bar.
+function signals(bar) {
+  // Example: buy when any BLE engine sees a liquidity sweep
+  const ble = bar.signals.filter(s => s.engine === 'BLE');
+  if (ble.some(s => s.type === 'sweep' && s.direction === 'up')) {
+    return [{ side: 'up', strength: 0.8, reason: 'BLE liquidity sweep up' }];
+  }
+  return [];
+}
+</textarea>
+          <div style="display:flex;gap:8px;margin-top:10px">
+            <button class="btn btn-primary btn-sm">▶ Run in Sandbox</button>
+            <button class="btn btn-secondary btn-sm">Save Strategy</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="lab-tab-rulebook" style="display:none">
+        <div class="panel" style="padding:18px">
+          <div class="empty-state"><div class="empty-icon">📏</div>No rules approved yet. Run the scanner and approve a rule to trade it here.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ LEARNING ═══════════════════════════════════════════════════════ -->
+    <div class="view" id="view-learning">
+      <div>
+        <div class="view-title"><span class="view-icon">🤖</span> Learning</div>
+        <div class="view-subtitle">ML engine proposals — approve a rule to trade it on paper</div>
+      </div>
+
+      <div class="stats-strip">
+        <div class="stat-card"><div class="stat-label">Training bars</div><div class="stat-value">0</div></div>
+        <div class="stat-card"><div class="stat-label">Proposals</div><div class="stat-value" id="proposals-count">0</div></div>
+        <div class="stat-card"><div class="stat-label">Approved rules</div><div class="stat-value accent" id="approved-count">0</div></div>
+        <div class="stat-card"><div class="stat-label">Gate status</div><div class="stat-value down" style="font-size:.85rem">Need 100 trades</div></div>
+      </div>
+
+      <div class="panel" style="padding:16px">
+        <div style="font-size:.88rem;font-weight:600;color:var(--text);margin-bottom:6px">How to approve a rule</div>
+        <div style="font-size:.78rem;color:var(--muted);line-height:1.6">
+          The scanner needs ≥ 100 closed paper trades (gate D13) before it can propose a rule.
+          Once a rule is proposed, type <code style="background:var(--surface3);padding:1px 5px;border-radius:3px">APPROVE &lt;id&gt;</code> in the box below to trade it on paper.
+          Rules are never traded live automatically — only on paper, and only after 100 trades.
+        </div>
+        <div style="display:flex;gap:8px;margin-top:12px">
+          <input class="form-input" id="approve-input" placeholder="APPROVE <rule-id>" style="flex:1;font-family:var(--font-mono);font-size:.8rem">
+          <button class="btn btn-primary btn-sm" id="btn-approve">Approve</button>
+        </div>
+      </div>
+
+      <div class="proposals-list" id="proposals-list">
+        <div class="empty-state"><div class="empty-icon">🤖</div>No proposals yet. The bot needs 100 paper trades first.</div>
+      </div>
+    </div>
+
+    <!-- ═══ BROKER ══════════════════════════════════════════════════════════ -->
+    <div class="view" id="view-broker">
+      <div>
+        <div class="view-title"><span class="view-icon">🔗</span> Broker Connection</div>
+        <div class="view-subtitle">Connect to your Deriv account — demo first, real money locked</div>
+      </div>
+
+      <!-- Mode selector -->
+      <div class="broker-panel">
+        <div>
+          <div style="font-size:.85rem;font-weight:600;color:var(--text);margin-bottom:4px">Trading Mode</div>
+          <div style="font-size:.75rem;color:var(--muted)">Choose how the bot places orders. Demo uses a Deriv virtual account with fake money.</div>
+        </div>
+        <div class="broker-mode-select">
+          <div class="mode-card active paper" data-mode="paper">
+            <div class="mode-icon">📄</div>
+            <div class="mode-label">Paper</div>
+            <div class="mode-desc">No network, no account, no risk. All trades are simulated.</div>
+          </div>
+          <div class="mode-card" data-mode="demo">
+            <div class="mode-icon">🧪</div>
+            <div class="mode-label">Demo</div>
+            <div class="mode-desc">Deriv virtual account. Real prices, fake money. Owner must unlock.</div>
+          </div>
+          <div class="mode-card" data-mode="real" style="opacity:.6">
+            <div class="mode-icon">🔒</div>
+            <div class="mode-label">Real</div>
+            <div class="mode-desc">Real money. <span class="mode-locked">LOCKED — written approval required.</span></div>
+          </div>
+        </div>
+
+        <!-- Connect form (shown for demo/real) -->
+        <div id="connect-form" style="display:none">
+          <div class="hr"></div>
+          <div class="form-row">
+            <label class="form-label">Deriv API Token</label>
+            <div class="token-input-row">
+              <input class="form-input" id="broker-token" type="password" placeholder="Your Deriv API token" autocomplete="off">
+              <button class="btn btn-secondary btn-sm" onclick="$('#broker-token').type==='password'?$('#broker-token').type='text':$('#broker-token').type='password'">👁</button>
+            </div>
+            <div class="form-hint" id="token-hint">Use a VIRTUAL account token for demo mode.</div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:4px">
+            <button class="btn btn-primary btn-sm" id="btn-connect">Connect</button>
+            <button class="btn btn-secondary btn-sm" id="btn-disconnect">Disconnect</button>
+          </div>
+        </div>
+
+        <!-- Risk info -->
+        <div style="background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.2);border-radius:var(--radius);padding:14px">
+          <div style="font-size:.8rem;font-weight:600;color:var(--warn);margin-bottom:8px">⚠️ Risk &amp; Limits</div>
+          <div style="font-size:.75rem;color:var(--muted2);line-height:1.6">
+            • The bot can use <strong style="color:var(--text)">at most $5 of balance</strong>. This is a hard limit.<br>
+            • Demo mode is locked until the owner enables it in settings.<br>
+            • Real money is locked until the owner explicitly unlocks it in writing.<br>
+            • The token is session-only — cleared when you close the tab.<br>
+            • No profit is guaranteed. You can lose every stake.
+          </div>
+        </div>
+      </div>
+
+      <!-- Account info panel (shown when connected) -->
+      <div class="panel" id="account-info-panel" style="display:none;padding:16px">
+        <div style="font-size:.85rem;font-weight:600;color:var(--text);margin-bottom:12px">Account</div>
+        <div class="form-grid" style="gap:10px">
+          <div><div class="form-label">Login ID</div><div style="font-family:var(--font-mono);font-size:.85rem;color:var(--text)" id="acct-loginid">—</div></div>
+          <div><div class="form-label">Account type</div><div id="acct-type">—</div></div>
+          <div><div class="form-label">Balance</div><div style="font-family:var(--font-mono);font-size:.85rem;color:var(--buy)" id="acct-balance">—</div></div>
+          <div><div class="form-label">Currency</div><div id="acct-currency">—</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ SETTINGS ═══════════════════════════════════════════════════════ -->
+    <div class="view" id="view-settings">
+      <div>
+        <div class="view-title"><span class="view-icon">⚙</span> Settings</div>
+        <div class="view-subtitle">Schema-driven configuration — 300+ options</div>
+      </div>
+
+      <div class="settings-search">
+        <span style="color:var(--muted)">🔍</span>
+        <input type="text" id="settings-search-input" placeholder="Search settings…">
+      </div>
+
+      <div class="settings-grid" id="settings-grid">
+        <!-- Quick settings -->
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-key">risk.riskPct</div>
+            <div class="setting-desc">Risk per trade (% of usable balance)</div>
+          </div>
+          <div class="setting-control">
+            <input class="form-input" style="width:80px" type="number" value="1" min="0.1" max="2" step="0.1">
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-key">risk.usableCapUsd</div>
+            <div class="setting-desc">Maximum usable balance in USD</div>
+            <div class="setting-locked">🔒 Locked at $5. Only the owner can raise this.</div>
+          </div>
+          <div class="setting-control">
+            <input class="form-input" style="width:80px" type="number" value="5" disabled>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-key">data.simSpeed</div>
+            <div class="setting-desc">Simulation speed (bars per second of real time)</div>
+          </div>
+          <div class="setting-control">
+            <select class="form-select" style="width:120px">
+              <option value="1">1×</option>
+              <option value="10">10×</option>
+              <option value="60" selected>60×</option>
+              <option value="600">600×</option>
+              <option value="max">Max</option>
+            </select>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-key">store.persist</div>
+            <div class="setting-desc">Save trades and history to IndexedDB</div>
+          </div>
+          <div class="setting-control">
+            <label class="setting-toggle">
+              <input type="checkbox" checked>
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-key">engine.tradeAssets</div>
+            <div class="setting-desc">Assets the bot monitors and trades</div>
+          </div>
+          <div class="setting-control">
+            <input class="form-input" style="width:160px" type="text" value="R_100">
+          </div>
+        </div>
+        <div class="setting-row" style="border-color:rgba(239,68,68,.3)">
+          <div class="setting-info">
+            <div class="setting-key">risk.liveGate</div>
+            <div class="setting-desc">Enable real-money trading</div>
+            <div class="setting-locked">🔒 Owner-only. Must be enabled in writing, not through this UI.</div>
+          </div>
+          <div class="setting-control">
+            <label class="setting-toggle">
+              <input type="checkbox" disabled>
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-key">risk.demoGateway</div>
+            <div class="setting-desc">Enable Deriv demo (virtual) account connection</div>
+            <div class="setting-locked">🔒 Owner-only unlock.</div>
+          </div>
+          <div class="setting-control">
+            <label class="setting-toggle">
+              <input type="checkbox" disabled>
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-secondary btn-sm" id="btn-export">📤 Export Settings</button>
+        <button class="btn btn-secondary btn-sm" id="btn-import">📥 Import Settings</button>
+        <button class="btn btn-danger btn-sm" id="btn-wipe">🗑 Wipe All Data</button>
+      </div>
+    </div>
+
+    <!-- ═══ ABOUT & RISK ════════════════════════════════════════════════════ -->
+    <div class="view" id="view-about">
+      <div>
+        <div class="view-title"><span class="view-icon">ℹ</span> About &amp; Risk</div>
+        <div class="view-subtitle">Honest limits, engine test results, and decision log</div>
+      </div>
+
+      <div class="about-card">
+        <div style="display:flex;align-items:center;gap:14px">
+          <img src="assets/krabby-logo.jpg" width="52" height="52" style="border-radius:12px">
+          <div>
+            <div style="font-size:1.1rem;font-weight:700;color:var(--text)">SimpleXEngine <span style="color:var(--accent)">[BOT]</span></div>
+            <div style="font-size:.75rem;color:var(--muted)">Krabby v<span id="app-version">1.0.0</span> · Deriv API · Static GitHub Pages</div>
+          </div>
+          <div style="margin-left:auto;display:flex;flex-direction:column;gap:4px;align-items:flex-end">
+            <div class="badge badge-muted">14 engines</div>
+            <div class="badge badge-muted">30+ markets</div>
+            <div class="badge badge-yellow">Beta</div>
+          </div>
+        </div>
+        <div style="font-size:.78rem;color:var(--muted2);line-height:1.6;padding:12px;background:var(--surface2);border-radius:var(--radius)">
+          SimpleXEngine is a beta. It learns from the market data and trades it sees on this device,
+          so the more you use it here, the more data it learns from.
+          <strong style="color:var(--text)">Nothing is guaranteed: no forecast or method wins every time, and you can lose the stake.</strong>
+        </div>
+      </div>
+
+      <!-- Honest lines -->
+      <div class="about-card">
+        <div style="font-size:.88rem;font-weight:600;color:var(--text);margin-bottom:4px">Honest Limits (read before trading)</div>
+        <div id="about-honest-lines" style="display:flex;flex-direction:column;gap:6px"></div>
+      </div>
+
+      <!-- Stress test results -->
+      <div class="about-card">
+        <div style="font-size:.88rem;font-weight:600;color:var(--text);margin-bottom:4px">
+          Engine Test Results — 150 real backtests, 5 market profiles
+        </div>
+        <div style="font-size:.72rem;color:var(--muted);margin-bottom:12px;line-height:1.5">
+          Run on this machine: 30 seeds × 5 profiles, 400 bars/run, $5 balance, 1% risk, relaxed limits.
+          Results are after costs (spread + slippage).
+        </div>
+        <div class="test-results" id="stress-results"></div>
+      </div>
+
+      <!-- Version info -->
+      <div class="about-card" style="font-size:.75rem;color:var(--muted);line-height:1.8">
+        <div><strong style="color:var(--muted2)">Build</strong> — Krabby · SimpleXEngine [BOT] · Static ES modules · GitHub Pages</div>
+        <div><strong style="color:var(--muted2)">Broker</strong> — Deriv (demo / real) · Legacy WS API · Multipliers contract type</div>
+        <div><strong style="color:var(--muted2)">Engines</strong> — BLE, BDE, SLE, SRE, OBE, FVG, MSE, CDE, SRD, BSL, QAE, LSE, PDE, BRL</div>
+        <div><strong style="color:var(--muted2)">Learning</strong> — LearningLoop · Scanner (BH-FDR, 16,407 conditions tested) · RuleBook</div>
+        <div><strong style="color:var(--muted2)">Storage</strong> — IndexedDB (consent gated) · localStorage (settings) · No server</div>
+        <div><strong style="color:var(--muted2)">Token</strong> — sessionStorage only, never persisted (D2)</div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script type="module" src="js/app.js"></script>
+<script>
+// Lab tab switching
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.tab[data-tab]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tab = btn.dataset.tab;
+      document.querySelectorAll('.tab[data-tab]').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+      ['backtest','scanner','editor','rulebook'].forEach(t => {
+        const el = document.getElementById(`lab-tab-${t}`);
+        if (el) el.style.display = t === tab ? '' : 'none';
+      });
+    });
+  });
+});
+</script>
+</body>
+</html>
