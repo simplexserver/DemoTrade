@@ -1,0 +1,33 @@
+name: Extract uploaded project ZIP
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "SimpleXEngine-BOT-v1.0.0.zip"
+
+permissions:
+  contents: write
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Extract project and remove archive
+        run: |
+          set -euo pipefail
+          archive="SimpleXEngine-BOT-v1.0.0.zip"
+          test -f "$archive"
+          unzip -o "$archive" -d .
+          rm "$archive"
+          rm -f .github/workflows/extract-project-zip.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Extract uploaded project source"
+          git push origin HEAD:main
