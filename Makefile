@@ -15,6 +15,7 @@ include $(THEOS)/makefiles/common.mk
 
 # ------ Project ---------------------------------------------------------------
 LIBRARY_NAME := LibTool
+LibTool_USE_MODULES := 0
 
 LibTool_FILES := \
     src/Core/Memory.mm        \
@@ -73,8 +74,7 @@ LibTool_CCFLAGS := \
 LibTool_OBJCCFLAGS := \
     -std=c++20         \
     -fobjc-arc         \
-    -fvisibility=hidden \
-    -fno-modules
+    -fvisibility=hidden
 
 # ------ Frameworks ------------------------------------------------------------
 LibTool_FRAMEWORKS := Foundation UIKit Metal MetalKit QuartzCore
