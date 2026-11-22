@@ -48,6 +48,12 @@ jobs:
           git clone --recursive --depth 1 \
             https://github.com/theos/theos.git "$HOME/theos"
           test -f "$HOME/theos/makefiles/common.mk"
+          mkdir -p "$HOME/theos/toolchain"
+          curl -fsSL --retry 3 \
+            https://github.com/L1ghtmann/llvm-project/releases/latest/download/iOSToolchain-x86_64.tar.xz \
+            | tar -xJf - -C "$HOME/theos/toolchain"
+          test -x "$HOME/theos/toolchain/linux/iphone/bin/clang"
+          "$HOME/theos/toolchain/linux/iphone/bin/clang" --version | head -1
           echo "THEOS=$HOME/theos" >> "$GITHUB_ENV"
 
       - name: Install iOS SDKs for cross-compilation
