@@ -93,7 +93,7 @@ jobs:
           done < <(find .theos -type f -name 'LibTool.dylib' -print0)
           if [[ -z "$DYLIB" ]]; then
             echo "::error::No universal LibTool.dylib with arm64 and arm64e slices was produced"
-            find .theos -type f -name 'LibTool.dylib' -exec file {} ; || true
+            find .theos -type f -name 'LibTool.dylib' -print || true
             exit 1
           fi
           mkdir -p dist
