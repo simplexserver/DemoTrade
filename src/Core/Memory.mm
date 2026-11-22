@@ -6,6 +6,7 @@
 #include "LibTool/Memory.hpp"
 #include <mach-o/dyld.h>
 #include <mach/vm_map.h>
+#include <libkern/OSCacheControl.h>
 #include <dlfcn.h>
 #include <setjmp.h>
 #include <signal.h>
@@ -211,8 +212,7 @@ WriteResult write(uintptr_t addr, T value) noexcept {
     *reinterpret_cast<volatile T*>(addr) = value;
 
     // Flush instruction cache for code patches (critical for hook installation).
-    __builtin___clear_cache(reinterpret_cast<char*>(addr),
-                            reinterpret_cast<char*>(addr) + sizeof(T));
+    sys_icache_invalidate(reinterpret_cast<void*>(addr), sizeof(T));
     return { MemStatus::Ok };
 }
 
@@ -237,8 +237,7 @@ WriteResult write_bytes(uintptr_t addr, const void* data, size_t count) noexcept
     if (sig != 0) return { MemStatus::Fault };
 
     std::memcpy(reinterpret_cast<void*>(addr), data, count);
-    __builtin___clear_cache(reinterpret_cast<char*>(addr),
-                            reinterpret_cast<char*>(addr) + count);
+    sys_icache_invalidate(reinterpret_cast<void*>(addr), count);
     return { MemStatus::Ok };
 }
 
@@ -267,8 +266,7 @@ WriteResult patch_nop(uintptr_t addr, uint32_t count) noexcept {
     static constexpr uint32_t NOP = 0xD503201F;
     uint32_t* p = reinterpret_cast<uint32_t*>(addr);
     for (uint32_t i = 0; i < count; ++i) p[i] = NOP;
-    __builtin___clear_cache(reinterpret_cast<char*>(addr),
-                            reinterpret_cast<char*>(addr) + count * 4);
+    sys_icache_invalidate(reinterpret_cast<void*>(addr), count * 4);
     return { MemStatus::Ok };
 }
 
@@ -336,21 +334,22 @@ std::vector<RegionInfo> enumerate_regions() noexcept {
     std::vector<RegionInfo> result;
     result.reserve(256);
     vm_address_t addr = 0;
-    uint32_t depth = 7;
     while (true) {
         vm_size_t size = 0;
-        vm_region_submap_info_data_64_t info{};
-        mach_msg_type_number_t cnt = VM_REGION_SUBMAP_INFO_COUNT_64;
-        kern_return_t kr = vm_region_recurse(
-            mach_task_self(), &addr, &size, &depth,
-            reinterpret_cast<vm_region_recurse_info_t>(&info), &cnt);
-        if (kr != KERN_SUCCESS) break;
+        vm_region_basic_info_data_64_t info{};
+        mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+        mach_port_t object = MACH_PORT_NULL;
+        kern_return_t kr = vm_region_64(
+            mach_task_self(), &addr, &size, VM_REGION_BASIC_INFO_64,
+            reinterpret_cast<vm_region_info_t>(&info), &count, &object);
+        if (kr != KERN_SUCCESS || size == 0) break;
         result.push_back({
             static_cast<uintptr_t>(addr),
             static_cast<size_t>(size),
             info.protection, info.max_protection,
-            depth, static_cast<bool>(info.is_submap)
+            0, false
         });
+        if (addr > UINT64_MAX - size) break;
         addr += size;
     }
     return result;
