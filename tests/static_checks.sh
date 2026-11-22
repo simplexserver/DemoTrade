@@ -106,7 +106,8 @@ echo "[ IL2CPP resolution strategies ]"
 grep -q 'resolve_via_dlsym'           src/Core/IL2CPP.mm || fail "dlsym strategy missing"
 grep -q 'resolve_via_pattern_scan'    src/Core/IL2CPP.mm || fail "pattern scan strategy missing"
 grep -q 'resolve_via_codereg_scan'    src/Core/IL2CPP.mm || fail "CodeReg scan strategy missing"
-grep -q 'IL2CPP Root Domain'          src/Core/IL2CPP.mm || fail "domain string anchor missing"
+grep -q 'decode_adrp_target'          src/Core/IL2CPP.mm || fail "ADRP target decoder missing"
+grep -q 'looks_like_domain'           src/Core/IL2CPP.mm || fail "domain pointer validation missing"
 pass "IL2CPP resolution strategies"
 
 # ------ Overlay key functions ------------------------------------------------
