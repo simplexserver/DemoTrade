@@ -4,6 +4,18 @@
 //
 // Priority 101: Memory.mm installs SIGBUS/SIGSEGV fault handlers (always first)
 // Priority 102: This file — waits for IL2CPP, then chains everything else
+//
+// FIXES applied:
+//   FIX-5: resolve_api() and lua::initialize() now run on a background queue,
+//          not on the main thread. The original code ran both inside the
+//          dispatch_after(main_queue) block, which blocked the main thread while
+//          scanning up to 64 MB of __TEXT and __DATA memory. Under memory
+//          pressure (or simply due to cache-cold page reads), this scan could
+//          stall the main thread long enough for the iOS watchdog to fire, or
+//          cause UIKit to miss render deadlines and panic.
+//          LTStartOverlay() is still dispatched to the main thread after
+//          resolution completes, because UIKit requires all window/view
+//          operations to run there.
 
 #import <Foundation/Foundation.h>
 #include "LibTool/Config.hpp"
@@ -17,30 +29,29 @@ static void LibToolEntry(void) {
     @autoreleasepool {
         NSLog(@"[" LT_TOOL_TITLE "] v" LT_VERSION_STR " loading...");
 
-        // Step 1: Wait for Unity IL2CPP runtime to fully initialize.
-        // When injected via DYLD_INSERT_LIBRARIES or jailbreak loader, the game's
-        // __attribute__((constructor)) chain may not have run yet.
-        // A 1.5-second dispatch delay covers Unity 6's slow metadata load on first run.
+        // Do not occupy the main queue while resolving IL2CPP or creating Lua.
+        // UIKit work is handed back to the main queue only after initialization.
         dispatch_after(
             dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)),
-            dispatch_get_main_queue(),
+            dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0),
             ^{
                 @autoreleasepool {
-                    // Step 2: Resolve IL2CPP API (3 strategies: dlsym → pattern → struct)
                     bool api_ok = lt::il2cpp::resolve_api();
                     NSLog(@"[" LT_TOOL_TITLE "] IL2CPP API: %s | Metadata: %s",
                           api_ok ? "OK" : "PARTIAL (stripped binary)",
                           lt::il2cpp::version_string());
 
-                    // Step 3: Initialize Lua VM and register all bindings.
-                    // Must follow resolve_api() so bindings can verify the API table.
                     bool lua_ok = lt::lua::initialize();
-                    NSLog(@"[" LT_TOOL_TITLE "] Lua runtime: %s", lua_ok ? "OK" : "FAIL");
+                    NSLog(@"[" LT_TOOL_TITLE "] Lua runtime: %s",
+                          lua_ok ? "OK" : "FAIL");
 
-                    // Step 4: Start the ImGui Metal overlay on the main thread.
-                    LTStartOverlay();
-
-                    NSLog(@"[" LT_TOOL_TITLE "] Online. discord.gg/Kr2pvPfEUR | t.me/IL2CPPTool");
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        @autoreleasepool {
+                            LTStartOverlay();
+                            NSLog(@"[" LT_TOOL_TITLE "] Online. "
+                                  "discord.gg/Kr2pvPfEUR | t.me/IL2CPPTool");
+                        }
+                    });
                 }
             }
         );
