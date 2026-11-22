@@ -1,7 +1,6 @@
 // language: Objective-C++, file: src/UI/Tab_LibTool.mm, target: iOS arm64/arm64e
 // LibTool tab — Hex Editor, Hook Manager, Scanner (AOB + pointer chain + diff).
 
-#import <Foundation/Foundation.h>
 #include "LibTool/Overlay.hpp"
 #include "LibTool/Hook.hpp"
 #include "LibTool/Scanner.hpp"
@@ -73,7 +72,10 @@ static void draw_hex_editor(float aw) {
     }
 
     uint8_t buf[256]{};
-    lt::mem::read_bytes(g_hex_addr, buf, 256);
+    if (lt::mem::read_bytes(g_hex_addr, buf, sizeof(buf)) != lt::mem::MemStatus::Ok) {
+        ImGui::TextColored({ 0.9f, 0.3f, 0.3f, 1.0f }, "Memory read failed.");
+        return;
+    }
 
     ImGui::Separator();
 
@@ -98,7 +100,6 @@ static void draw_hex_editor(float aw) {
     // 16-column hex grid
     ImGui::BeginChild("##hex_grid", { 0, 0 }, false,
                       ImGuiWindowFlags_HorizontalScrollbar);
-    ImDrawList* dl = ImGui::GetWindowDrawList();
 
     for (int row = 0; row < 16; ++row) {
         // Address column
@@ -153,13 +154,16 @@ static void draw_hex_editor(float aw) {
         ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(160, 80, 10, 220));
         if (ImGui::Button("Write byte", { 90, 22 })) {
             uint8_t v = static_cast<uint8_t>(edit_val);
-            lt::mem::write<uint8_t>(g_hex_addr + g_hex_sel_byte, v);
-            g_hex_modified[g_hex_sel_byte] = true;
-            lt::lua::console_append(
-                std::string("[HexEd] Write 0x") +
-                [NSString stringWithFormat:@"%02X", v].UTF8String +
-                " → 0x" +
-                [NSString stringWithFormat:@"%llX", (unsigned long long)(g_hex_addr + g_hex_sel_byte)].UTF8String);
+            const auto result = lt::mem::write<uint8_t>(g_hex_addr + g_hex_sel_byte, v);
+            if (result.ok()) {
+                g_hex_modified[g_hex_sel_byte] = true;
+                char message[128]{};
+                std::snprintf(message, sizeof(message), "[HexEd] Write 0x%02X -> 0x%llX",
+                    v, (unsigned long long)(g_hex_addr + g_hex_sel_byte));
+                lt::lua::console_append(message);
+            } else {
+                lt::lua::console_append("[HexEd] Memory write failed");
+            }
         }
         ImGui::PopStyleColor();
     }
@@ -232,9 +236,13 @@ static void draw_hook_manager(float aw) {
         sscanf(qp_addr, "0x%llX", &va);
         uintptr_t addr = static_cast<uintptr_t>(va);
         if (addr) {
-            if (qp_kind == 0) lt::hook::patch_ret(addr);
-            else if (qp_kind == 1) lt::hook::patch_nop(addr, 1);
-            else lt::hook::patch_nop(addr, 4);
+            uint32_t patch_id = 0;
+            if (qp_kind == 0) patch_id = lt::hook::patch_ret(addr);
+            else if (qp_kind == 1) patch_id = lt::hook::patch_nop(addr, 1);
+            else patch_id = lt::hook::patch_nop(addr, 4);
+            lt::lua::console_append(patch_id
+                ? "[Quick Patch] applied (id " + std::to_string(patch_id) + ")"
+                : "[Quick Patch] failed");
         }
     }
 }
