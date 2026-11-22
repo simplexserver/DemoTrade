@@ -11,9 +11,7 @@
 #include "LibTool/LuaRuntime.hpp"
 #include "LibTool/Config.hpp"
 #include "imgui.h"
-#ifndef IM_COL32_AS_VEC4
-#define IM_COL32_AS_VEC4(_COL) ImGui::ColorConvertU32ToFloat4(static_cast<ImU32>(_COL))
-#endif
+static inline ImVec4 IM_COL32_AS_VEC4(ImU32 c);
 #include "backends/imgui_impl_metal.h"
 #include <cmath>
 #include <cstring>
