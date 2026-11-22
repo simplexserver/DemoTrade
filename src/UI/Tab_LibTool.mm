@@ -18,7 +18,6 @@ static int g_lbt_tab = 0;  // 0=Hex 1=Hooks 2=Scanner 3=AOB 4=Diff
 
 // ------ Hex Editor state -----------------------------------------------------
 static uintptr_t g_hex_addr{ 0 };
-static uintptr_t g_hex_edit_addr{ 0 };
 static char      g_hex_addr_buf[20]{ "0x0000000000000000" };
 static int       g_hex_sel_byte{ -1 };
 static bool      g_hex_modified[256]{};
