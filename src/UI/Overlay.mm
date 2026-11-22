@@ -11,6 +11,9 @@
 #include "LibTool/LuaRuntime.hpp"
 #include "LibTool/Config.hpp"
 #include "imgui.h"
+#ifndef IM_COL32_AS_VEC4
+#define IM_COL32_AS_VEC4(_COL) ImGui::ColorConvertU32ToFloat4(static_cast<ImU32>(_COL))
+#endif
 #include "backends/imgui_impl_metal.h"
 #include <cmath>
 #include <cstring>
@@ -377,9 +380,7 @@ void DiscordButton(float width) noexcept {
     ImGui::PushStyleColor(ImGuiCol_ButtonActive,  IM_COL32_AS_VEC4(0xFF4752C4));
     if (ImGui::Button("  Discord Server", { width, 0 })) {
         NSURL* url = [NSURL URLWithString:@LT_DISCORD_URL];
-        bool opened = [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
-        if (!opened)
-            ImGui::SetClipboardText(LT_DISCORD_URL);
+        [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
         ImGui::SetClipboardText(LT_DISCORD_URL);  // always copy (belt + suspenders)
     }
     ImGui::PopStyleColor(3);
@@ -502,7 +503,7 @@ bool DrawEyeToggle() noexcept {
 
     ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
                              ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse |
-                             ImGuiWindowFlags_NoBringToDisplayFront | ImGuiWindowFlags_NoNav;
+                             ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNav;
 
     if (ImGui::Begin("##eye_toggle", nullptr, flags)) {
         ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -646,7 +647,6 @@ void draw_frame() noexcept {
     float tab_w = aw / 5.0f;
     for (int i = 0; i < 5; ++i) {
         bool active = (g_state.active_tab == static_cast<Tab>(i));
-        ImVec2 cursor = ImGui::GetCursorScreenPos();
         if (active) {
             ImGui::PushStyleColor(ImGuiCol_Button, tab_active_colors[i]);
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, tab_active_colors[i]);
