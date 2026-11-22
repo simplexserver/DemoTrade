@@ -73,7 +73,8 @@ LibTool_CCFLAGS := \
 LibTool_OBJCCFLAGS := \
     -std=c++20         \
     -fobjc-arc         \
-    -fvisibility=hidden
+    -fvisibility=hidden \
+    -fno-modules
 
 # ------ Frameworks ------------------------------------------------------------
 LibTool_FRAMEWORKS := Foundation UIKit Metal MetalKit QuartzCore
