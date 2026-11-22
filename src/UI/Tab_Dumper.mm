@@ -1,7 +1,6 @@
 // language: Objective-C++, file: src/UI/Tab_Dumper.mm, target: iOS arm64/arm64e
 // Dumper tab — assembly image list, class filter, dump.cs export.
 
-#import <Foundation/Foundation.h>
 #include "LibTool/Overlay.hpp"
 #include "LibTool/IL2CPP.hpp"
 #include "LibTool/LuaRuntime.hpp"
@@ -13,6 +12,7 @@
 #include <string>
 #include <atomic>
 #include <thread>
+#include <cstdlib>
 
 namespace lt::ui {
 
@@ -43,12 +43,16 @@ static void run_dump(int image_idx) {
     if (image_idx < 0 || image_idx >= (int)images.size()) {
         g_dump_running = false; return;
     }
-    auto& [img, iname] = images[image_idx];
+    const auto image_entry = images[image_idx];
+    const Il2CppImage* img = image_entry.first;
+    const std::string iname = image_entry.second;
 
     std::thread([img, iname]() {
-        NSString* path = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject
-                          stringByAppendingPathComponent:@"dump.cs"];
-        FILE* f = fopen(path.UTF8String, "w");
+        const char* home = std::getenv("HOME");
+        const std::string path = home && *home
+            ? std::string(home) + "/Documents/dump.cs"
+            : "/tmp/dump.cs";
+        FILE* f = std::fopen(path.c_str(), "w");
         if (!f) { g_dump_running = false; return; }
 
         fprintf(f, "// SimpleXLibTool v%s — Dump\n// Image: %s\n\n",
@@ -125,9 +129,11 @@ void draw_tab_dumper() noexcept {
             run_dump(g_sel_image);
         ImGui::SameLine(0, 6);
         if (ImGui::Button("Copy path", { aw * 0.35f, 28 })) {
-            NSString* p = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject
-                           stringByAppendingPathComponent:@"dump.cs"];
-            ImGui::SetClipboardText(p.UTF8String);
+            const char* home = std::getenv("HOME");
+            const std::string path = home && *home
+                ? std::string(home) + "/Documents/dump.cs"
+                : "/tmp/dump.cs";
+            ImGui::SetClipboardText(path.c_str());
         }
     } else {
         ImGui::TextDisabled("Dumping — please wait...");
