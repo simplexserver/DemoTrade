@@ -8,8 +8,11 @@ extern "C" {
 #include "lualib.h"
 }
 #include "imgui.h"
+#include <algorithm>
 #include <cstring>
 #include <cstdio>
+#include <string>
+#include <vector>
 
 // ------ Draw list userdata ---------------------------------------------------
 static const char* DRAWLIST_MT = "LT.DrawList";
@@ -137,7 +140,7 @@ static int push_drawlist(lua_State* L, ImDrawList* dl) {
 extern "C" int luaopen_ImGui(lua_State* L) {
     lua_newtable(L);
 
-#define REG(name, fn) lua_pushcfunction(L, fn); lua_setfield(L, -2, name)
+#define REG(name, ...) do { lua_pushcclosure(L, (__VA_ARGS__), 0); lua_setfield(L, -2, name); } while (0)
 
     // --- Window management
     REG("Begin", [](lua_State* L)->int {
@@ -280,12 +283,18 @@ extern "C" int luaopen_ImGui(lua_State* L) {
     });
     REG("InputTextMultiline", [](lua_State* L)->int {
         const char* lbl = luaL_checkstring(L,1);
-        char* buf       = (char*)luaL_checkstring(L,2);
-        size_t bufsz    = (size_t)luaL_optinteger(L,3,1024);
+        size_t input_len = 0;
+        const char* input = luaL_checklstring(L,2,&input_len);
+        lua_Integer requested = luaL_optinteger(L,3,1024);
+        size_t requested_size = requested > 0 ? static_cast<size_t>(requested) : 1U;
+        size_t bufsz = std::max(input_len + 1U, std::min(requested_size, size_t{1U << 20}));
+        std::vector<char> buffer(bufsz, '\0');
+        if (input_len != 0) std::memcpy(buffer.data(), input, input_len);
         float w = (float)luaL_optnumber(L,4,0), h = (float)luaL_optnumber(L,5,0);
         ImGuiInputTextFlags flags = (ImGuiInputTextFlags)luaL_optinteger(L,6,0);
-        bool changed = ImGui::InputTextMultiline(lbl, buf, bufsz, {w,h}, flags);
-        lua_pushboolean(L, changed); return 1;
+        bool changed = ImGui::InputTextMultiline(lbl, buffer.data(), buffer.size(), {w,h}, flags);
+        lua_pushboolean(L, changed);
+        return 1;
     });
     REG("InputFloat", [](lua_State* L)->int {
         const char* lbl = luaL_checkstring(L,1);
@@ -466,7 +475,7 @@ extern "C" int luaopen_ImGui(lua_State* L) {
     lua_pushinteger(L, ImGuiWindowFlags_NoScrollbar);   lua_setfield(L,-2,"WindowFlags_NoScrollbar");
     lua_pushinteger(L, ImGuiWindowFlags_AlwaysAutoResize);lua_setfield(L,-2,"WindowFlags_AlwaysAutoResize");
     lua_pushinteger(L, ImGuiWindowFlags_NoBackground);  lua_setfield(L,-2,"WindowFlags_NoBackground");
-    lua_pushinteger(L, ImGuiWindowFlags_NoBringToDisplayFront);lua_setfield(L,-2,"WindowFlags_NoBringToDisplayFront");
+    lua_pushinteger(L, ImGuiWindowFlags_NoBringToFrontOnFocus);lua_setfield(L,-2,"WindowFlags_NoBringToDisplayFront");
 
     lua_pushinteger(L, ImGuiStyleVar_Alpha);         lua_setfield(L,-2,"StyleVar_Alpha");
     lua_pushinteger(L, ImGuiStyleVar_WindowRounding);lua_setfield(L,-2,"StyleVar_WindowRounding");
