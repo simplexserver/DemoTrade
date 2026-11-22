@@ -5,6 +5,7 @@
 #include <string>
 #include <string_view>
 #include <functional>
+#include <vector>
 
 // Forward-declare lua_State so callers don't need lua.h
 struct lua_State;
@@ -36,6 +37,7 @@ void dispatch_on_update() noexcept;
 
 // Append a line to the script console (thread-safe).
 void console_append(std::string line) noexcept;
+[[nodiscard]] std::vector<std::string> console_snapshot();
 
 // Low-level access for bindings.
 [[nodiscard]] lua_State* state() noexcept;
