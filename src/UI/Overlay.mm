@@ -28,6 +28,11 @@ void draw_tab_settings() noexcept;
 void draw_tab_libtool() noexcept;
 }
 
+// ImGui uses logical UIKit points. These rectangles are updated by draw_frame
+// and used by the pass-through overlay window to avoid swallowing game touches.
+static CGRect g_eye_toggle_bounds = CGRectZero;
+static CGRect g_main_panel_bounds = CGRectZero;
+
 namespace lt::ui {
 
 // ------ Global state ---------------------------------------------------------
@@ -505,6 +510,7 @@ bool DrawEyeToggle() noexcept {
     if (ImGui::Begin("##eye_toggle", nullptr, flags)) {
         ImDrawList* dl = ImGui::GetWindowDrawList();
         ImVec2 wpos = ImGui::GetWindowPos();
+        g_eye_toggle_bounds = CGRectMake(wpos.x, wpos.y, sz, sz);
 
         // Dark rounded background
         float t = static_cast<float>(ImGui::GetTime());
@@ -544,6 +550,8 @@ bool DrawEyeToggle() noexcept {
 
 // ------ Main frame render ----------------------------------------------------
 void draw_frame() noexcept {
+    g_main_panel_bounds = CGRectZero;
+
     // Eye toggle always on top
     if (DrawEyeToggle()) {
         g_state.visible = !g_state.visible;
@@ -573,13 +581,18 @@ void draw_frame() noexcept {
     // Custom title bar gradient
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, { 0.0f, 0.0f });
     bool open = true;
-    if (!ImGui::Begin("##libtool_main", &open, wflags)) {
+    const bool main_contents_visible = ImGui::Begin("##libtool_main", &open, wflags);
+    const ImVec2 main_pos = ImGui::GetWindowPos();
+    const ImVec2 main_size = ImGui::GetWindowSize();
+    g_main_panel_bounds = CGRectMake(main_pos.x, main_pos.y, main_size.x, main_size.y);
+    if (!main_contents_visible) {
         ImGui::End();
         ImGui::PopStyleVar();
         return;
     }
     if (!open) {
         g_state.visible = false;
+        g_main_panel_bounds = CGRectZero;
         ImGui::End();
         ImGui::PopStyleVar();
         return;
@@ -692,10 +705,18 @@ void draw_frame() noexcept {
 
 @implementation LTMetalView
 
-- (void)setup {
-    self.device        = MTLCreateSystemDefaultDevice();
-    self.commandQueue  = [self.device newCommandQueue];
-    self.delegate      = self;
+- (BOOL)setup {
+    self.device = MTLCreateSystemDefaultDevice();
+    if (!self.device) {
+        NSLog(@"[LibTool] Metal device unavailable; overlay not started");
+        return NO;
+    }
+    self.commandQueue = [self.device newCommandQueue];
+    if (!self.commandQueue) {
+        NSLog(@"[LibTool] Metal command queue unavailable; overlay not started");
+        return NO;
+    }
+    self.paused = YES;
     self.clearColor    = MTLClearColorMake(0, 0, 0, 0);
     self.colorPixelFormat = MTLPixelFormatBGRA8Unorm;
     self.opaque        = NO;
@@ -710,22 +731,30 @@ void draw_frame() noexcept {
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 
     // Display size from screen
-    CGRect bounds = [UIScreen mainScreen].nativeBounds;
+    // UIKit view bounds and ImGui input events are both in logical points.
+    // Metal's framebuffer scale converts those points to physical pixels.
     CGFloat scale = [UIScreen mainScreen].nativeScale;
-    io.DisplaySize            = { (float)(bounds.size.width / scale),
-                                  (float)(bounds.size.height / scale) };
+    io.DisplaySize = { (float)self.bounds.size.width, (float)self.bounds.size.height };
     io.DisplayFramebufferScale = { (float)scale, (float)scale };
 
     // Font — load default + slightly larger size
     io.Fonts->AddFontDefault();
     io.FontGlobalScale = lt::ui::g_state.ui_scale;
 
-    ImGui_ImplMetal_Init(self.device);
+    if (!ImGui_ImplMetal_Init(self.device)) {
+        NSLog(@"[LibTool] ImGui Metal backend initialization failed");
+        ImGui::DestroyContext();
+        return NO;
+    }
     lt::ui::apply_theme();
+    self.delegate = self;
+    // The view is resumed only after the containing window is visible.
+    return YES;
 }
 
 - (void)drawInMTKView:(MTKView*)view {
-    if (!view.currentDrawable || !view.currentRenderPassDescriptor) return;
+    if (!self.commandQueue || !view.currentDrawable || !view.currentRenderPassDescriptor ||
+        ImGui::GetCurrentContext() == nullptr) return;
 
     ImGui_ImplMetal_NewFrame(view.currentRenderPassDescriptor);
     ImGui::NewFrame();
@@ -742,8 +771,10 @@ void draw_frame() noexcept {
     ImGui::Render();
 
     id<MTLCommandBuffer> cb = [self.commandQueue commandBuffer];
+    if (!cb) return;
     id<MTLRenderCommandEncoder> enc =
         [cb renderCommandEncoderWithDescriptor:view.currentRenderPassDescriptor];
+    if (!enc) return;
     ImGui_ImplMetal_RenderDrawData(ImGui::GetDrawData(), cb, enc);
     [enc endEncoding];
     [cb presentDrawable:view.currentDrawable];
@@ -760,8 +791,7 @@ void draw_frame() noexcept {
 - (void)forwardTouch:(UITouch*)touch down:(BOOL)down {
     CGPoint loc = [touch locationInView:self];
     ImGuiIO& io = ImGui::GetIO();
-    CGFloat s   = [UIScreen mainScreen].nativeScale;
-    io.AddMousePosEvent(loc.x * s, loc.y * s);
+    io.AddMousePosEvent(loc.x, loc.y);
     if (down) io.AddMouseButtonEvent(0, true);
     else      io.AddMouseButtonEvent(0, false);
 }
@@ -783,39 +813,100 @@ void draw_frame() noexcept {
 @end
 @implementation LTOverlayWindow
 - (UIView*)hitTest:(CGPoint)point withEvent:(UIEvent*)event {
-    UIView* hit = [super hitTest:point withEvent:event];
-    return (hit == self) ? nil : hit;
+    const BOOL in_toggle = CGRectContainsPoint(g_eye_toggle_bounds, point);
+    const BOOL in_panel = CGRectContainsPoint(g_main_panel_bounds, point);
+    if (!in_toggle && !in_panel) return nil;
+    return [super hitTest:point withEvent:event];
 }
 @end
 
 // ------ Public entry point ---------------------------------------------------
+// UIWindow is not guaranteed to remain alive merely because makeKeyAndVisible
+// was called. Keep a strong process-lifetime reference and create it once.
+static LTOverlayWindow *g_overlay_window = nil;
+static id g_app_active_observer = nil;
+static id g_scene_active_observer = nil;
+
+static UIWindowScene* LTFindForegroundScene(void) {
+    NSSet<UIScene*> *scenes = [UIApplication sharedApplication].connectedScenes;
+    for (UIScene *candidate in scenes) {
+        if ([candidate isKindOfClass:[UIWindowScene class]] &&
+            candidate.activationState == UISceneActivationStateForegroundActive) {
+            return (UIWindowScene*)candidate;
+        }
+    }
+    return nil;
+}
+
+static void LTInstallSceneObservers(void) {
+    NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
+    if (!g_app_active_observer) {
+        g_app_active_observer = [center addObserverForName:UIApplicationDidBecomeActiveNotification
+            object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(__unused NSNotification *note) {
+                LTStartOverlay();
+            }];
+    }
+    if (@available(iOS 13.0, *)) {
+        if (!g_scene_active_observer) {
+            g_scene_active_observer = [center addObserverForName:UISceneDidActivateNotification
+                object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(__unused NSNotification *note) {
+                    LTStartOverlay();
+                }];
+        }
+    }
+}
+
 void LTStartOverlay(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        UIWindowScene* scene = nil;
-        for (UIScene* s in [UIApplication sharedApplication].connectedScenes) {
-            if ([s isKindOfClass:[UIWindowScene class]]) {
-                scene = (UIWindowScene*)s;
-                break;
-            }
+        LTInstallSceneObservers();
+        UIWindowScene *scene = LTFindForegroundScene();
+        if (!scene) {
+            LTInstallSceneObservers();
+            NSLog(@"[LibTool] waiting for a foreground-active UIWindowScene");
+            return;
         }
 
-        CGRect frame = [UIScreen mainScreen].bounds;
-        LTOverlayWindow* window = [[LTOverlayWindow alloc]
-            initWithWindowScene:scene ?: nil];
-        if (!window.windowScene) {
-            // Fallback for older iOS init paths
-            window.frame = frame;
+        if (g_overlay_window && g_overlay_window.windowScene == scene) {
+            g_overlay_window.hidden = NO;
+            [g_overlay_window makeKeyAndVisible];
+            return;
         }
-        window.windowLevel = UIWindowLevelAlert + 100;
+        if (g_overlay_window) {
+            g_overlay_window.hidden = YES;
+            g_overlay_window = nil;
+        }
+
+        CGRect frame = scene.coordinateSpace.bounds;
+        if (CGRectIsEmpty(frame)) frame = [UIScreen mainScreen].bounds;
+        LTOverlayWindow *window = [[LTOverlayWindow alloc] initWithWindowScene:scene];
+        if (!window) {
+            NSLog(@"[LibTool] failed to create overlay window for active scene");
+            LTInstallSceneObservers();
+            return;
+        }
+        window.frame = frame;
+        window.windowLevel = UIWindowLevelAlert + 1;
         window.backgroundColor = UIColor.clearColor;
         window.opaque = NO;
-        window.hidden = NO;
-        [window makeKeyAndVisible];
 
-        LTMetalView* mv = [[LTMetalView alloc] initWithFrame:frame];
-        [mv setup];
-        window.rootViewController = [[UIViewController alloc] init];
-        window.rootViewController.view = mv;
+        LTMetalView *metal_view = [[LTMetalView alloc] initWithFrame:window.bounds];
+        metal_view.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        if (![metal_view setup]) {
+            NSLog(@"[LibTool] overlay setup failed; keeping app input untouched");
+            return;
+        }
+
+        UIViewController *root = [[UIViewController alloc] init];
+        root.view = metal_view;
+        root.view.backgroundColor = UIColor.clearColor;
+        root.view.opaque = NO;
+        window.rootViewController = root;
+
+        // Retain before visibility so the scene/window lifecycle cannot drop it.
+        g_overlay_window = window;
+        [window makeKeyAndVisible];
+        metal_view.paused = NO;
+        NSLog(@"[LibTool] overlay attached to foreground scene; eye toggle active");
     });
 }
 

@@ -79,7 +79,7 @@ LibTool_OBJCCFLAGS := \
     -fvisibility=hidden
 
 # ------ Frameworks ------------------------------------------------------------
-LibTool_FRAMEWORKS := Foundation UIKit Metal MetalKit QuartzCore
+LibTool_FRAMEWORKS := Foundation UIKit CoreGraphics Metal MetalKit QuartzCore
 
 # ------ Install path ----------------------------------------------------------
 LibTool_INSTALL_PATH := /usr/lib

@@ -182,8 +182,44 @@ static bool resolve_via_pattern_scan() noexcept {
 
     if (!text.base || !text.size || !data.base) return false;
 
-    const uint32_t* insns = reinterpret_cast<const uint32_t*>(text.base);
-    size_t count = text.size / 4;
+    // FIX-3: Copy __TEXT into a local buffer before scanning.
+    //
+    // Scanning live mapped memory word-by-word is not safe: a code page that
+    // passes the vm_region_64 readable check can still generate SIGBUS if the
+    // kernel evicts it between the check and the dereference (e.g. under memory
+    // pressure, or when Unity's internal allocator reorganises its address space).
+    // With g_in_fault_guard=false at that point our signal handler falls through
+    // to SIG_DFL and the process dies — the observed ~2-second crash.
+    //
+    // vm_read_overwrite atomically transfers the range into our heap buffer.
+    // If any part is not readable it returns a non-SUCCESS kern_return_t and we
+    // bail cleanly. All subsequent accesses are on private heap memory that
+    // cannot be remapped under us.
+    //
+    // Cap the buffer at 64 MB. __TEXT is typically 20-100 MB; a scan of the
+    // first 64 MB covers the runtime metadata area where il2cpp_domain_get lives.
+    static constexpr size_t kMaxTextScan = 64u * 1024u * 1024u;
+    size_t scan_size = std::min(text.size, kMaxTextScan);
+
+    std::vector<uint32_t> text_buf(scan_size / 4);
+    {
+        vm_size_t out_size = 0;
+        kern_return_t kr = vm_read_overwrite(
+            mach_task_self(),
+            static_cast<vm_address_t>(text.base),
+            static_cast<vm_size_t>(scan_size),
+            reinterpret_cast<vm_address_t>(text_buf.data()),
+            &out_size);
+        if (kr != KERN_SUCCESS || out_size < 12) {
+            NSLog(@"[LibTool] pattern_scan: vm_read_overwrite __TEXT failed kr=%d", kr);
+            return false;
+        }
+        // Adjust to however much was actually read
+        scan_size = static_cast<size_t>(out_size) & ~3u;
+    }
+
+    const uint32_t* insns = text_buf.data();
+    size_t count = scan_size / 4;
     static constexpr uint32_t RET = 0xD65F03C0u;
 
     for (size_t i = 0; i + 2 < count; ++i) {
@@ -257,14 +293,41 @@ static bool resolve_via_codereg_scan() noexcept {
     Section data = get_section(img_idx, "__DATA", "__data");
     if (!data.base || data.size < 32) return false;
 
-    const uint8_t* base = reinterpret_cast<const uint8_t*>(data.base);
-    const uint8_t* end  = base + data.size - 16;
+    // FIX-4: Same SIGBUS risk as the __TEXT scan above.
+    // Copy __DATA into a local buffer via vm_read_overwrite before scanning.
+    // __DATA is typically 4-20 MB; cap at 32 MB.
+    static constexpr size_t kMaxDataScan = 32u * 1024u * 1024u;
+    size_t scan_size = std::min(data.size, kMaxDataScan);
 
-    for (const uint8_t* p = base; p < end; p += 4) {
+    std::vector<uint8_t> data_buf(scan_size);
+    {
+        vm_size_t out_size = 0;
+        kern_return_t kr = vm_read_overwrite(
+            mach_task_self(),
+            static_cast<vm_address_t>(data.base),
+            static_cast<vm_size_t>(scan_size),
+            reinterpret_cast<vm_address_t>(data_buf.data()),
+            &out_size);
+        if (kr != KERN_SUCCESS || out_size < 16) {
+            NSLog(@"[LibTool] codereg_scan: vm_read_overwrite __DATA failed kr=%d", kr);
+            return false;
+        }
+        scan_size = static_cast<size_t>(out_size);
+    }
+
+    // The buffer is a snapshot. Pointers decoded from it are virtual addresses
+    // in the target process — still need guarded reads to follow them.
+    const uint8_t* base_ptr = data_buf.data();
+    const uint8_t* end_ptr  = base_ptr + scan_size - 16;
+
+    for (const uint8_t* p = base_ptr; p < end_ptr; p += 4) {
         uint32_t maybe_count = *reinterpret_cast<const uint32_t*>(p);
         if (maybe_count < 1 || maybe_count > 200) continue;
 
-        uintptr_t maybe_arr_ptr_slot = reinterpret_cast<uintptr_t>(p + 4);
+        // p is a pointer into our local buffer copy. The corresponding virtual
+        // address in the process is data.base + (p - base_ptr).
+        uintptr_t va_offset = static_cast<uintptr_t>(p - base_ptr);
+        uintptr_t maybe_arr_ptr_slot = data.base + va_offset + 4;
         auto arr_ptr_res = lt::mem::read_ptr(maybe_arr_ptr_slot);
         if (!arr_ptr_res.ok() || !arr_ptr_res.value) continue;
 
@@ -408,9 +471,11 @@ bool resolve_api() {
     g_meta_version = detect_meta_version();
     NSLog(@"[LibTool] Metadata version: %s", version_string());
 
-    // Mark resolved if at minimum domain_get works
+    // Do not permanently latch a failed first attempt. UnityFramework may not
+    // have finished loading when the dylib constructor runs; EntryPoint retries
+    // until the runtime exports or data slots become available.
     g_api.resolved = (g_api.domain_get != nullptr);
-    g_resolved = true;
+    g_resolved = g_api.resolved;
 
     if (!g_api.resolved) {
         NSLog(@"[LibTool] WARNING: IL2CPP API unresolved. Tool functionality limited.");

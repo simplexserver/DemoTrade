@@ -24,6 +24,9 @@
 
 namespace lt::mem {
 
+// Install guarded-read signal handlers after the host runtime has registered its own.
+void install_fault_handlers() noexcept;
+
 // Il2CppString layout: object header, UTF-16 length, then character data.
 inline constexpr size_t IL2CPP_STRING_LENGTH_OFFSET = 0x10;
 inline constexpr size_t IL2CPP_STRING_CHARS_OFFSET = 0x14;

@@ -1,6 +1,12 @@
 // language: Objective-C++, file: src/Core/Memory.mm, target: iOS arm64/arm64e
 // Memory engine — fault containment, PAC stripping, protect elevation, region scan.
-// Two-layer fault guard: mach_vm_region pre-validation + sigsetjmp/siglongjmp fallback.
+//
+// FIXES applied:
+//   FIX-1: elevate_rwx now queries original protection BEFORE calling vm_protect.
+//          Previously it queried after, so info.protection reflected the NEW (RWX)
+//          value and the RAII guard restored to RWX instead of the original.
+//   FIX-2: Signal handler now chains the previous SIGBUS/SIGSEGV handler (Unity's
+//          crash reporter, LLDB, etc.) instead of hard-resetting to SIG_DFL.
 
 #import <Foundation/Foundation.h>
 #include "LibTool/Memory.hpp"
@@ -11,10 +17,10 @@
 #include <setjmp.h>
 #include <signal.h>
 #include <sys/mman.h>
-#include <codecvt>
-#include <locale>
 #include <cstring>
 #include <algorithm>
+#include <mutex>
+#include <limits>
 
 // ------ Thread-local fault guard state ---------------------------------------
 namespace {
@@ -22,16 +28,34 @@ namespace {
 thread_local sigjmp_buf  g_fault_buf;
 thread_local bool        g_in_fault_guard{ false };
 
-void fault_signal_handler(int sig, siginfo_t*, void*) noexcept {
+// FIX-2: Save previous handlers so we can chain them on non-guarded faults.
+// Unity installs its own SIGBUS/SIGSEGV handlers before our dylib constructor
+// runs (via its own constructors and runtime init). We must chain them, not
+// discard them, otherwise Unity's crash reporter and LLDB stop working.
+static struct sigaction g_prev_sigbus{};
+static struct sigaction g_prev_sigsegv{};
+
+void fault_signal_handler(int sig, siginfo_t* info, void* ctx) noexcept {
     if (g_in_fault_guard) {
         siglongjmp(g_fault_buf, sig);
     }
-    // Not guarded — re-raise with default action (crash with diagnostic context).
-    struct sigaction sa{};
-    sa.sa_handler = SIG_DFL;
-    sigemptyset(&sa.sa_mask);
-    sigaction(sig, &sa, nullptr);
-    raise(sig);
+    // Not inside a fault guard — chain the previous handler instead of
+    // resetting to SIG_DFL, which would discard Unity's crash reporter.
+    struct sigaction* prev = (sig == SIGBUS) ? &g_prev_sigbus : &g_prev_sigsegv;
+    if (prev->sa_sigaction && (prev->sa_flags & SA_SIGINFO)) {
+        prev->sa_sigaction(sig, info, ctx);
+    } else if (prev->sa_handler && prev->sa_handler != SIG_DFL
+               && prev->sa_handler != SIG_IGN) {
+        prev->sa_handler(sig);
+    } else {
+        // No useful previous handler — reinstall default and re-raise so the
+        // OS generates the crash report normally.
+        struct sigaction sa{};
+        sa.sa_handler = SIG_DFL;
+        sigemptyset(&sa.sa_mask);
+        sigaction(sig, &sa, nullptr);
+        raise(sig);
+    }
 }
 
 struct FaultGuard {
@@ -40,22 +64,25 @@ struct FaultGuard {
     FaultGuard(const FaultGuard&) = delete;
 };
 
-// Register SIGBUS and SIGSEGV handlers on first use.
-// Priority 101 so it runs before EntryPoint (priority 102).
-__attribute__((constructor(101)))
-static void install_fault_handlers() {
-    struct sigaction sa{};
-    sa.sa_sigaction = fault_signal_handler;
-    sa.sa_flags     = SA_SIGINFO | SA_NODEFER;
-    sigemptyset(&sa.sa_mask);
-    sigaction(SIGBUS,  &sa, nullptr);
-    sigaction(SIGSEGV, &sa, nullptr);
-}
 
 } // namespace
 
 // ------ Template read implementation -----------------------------------------
 namespace lt::mem {
+
+void install_fault_handlers() noexcept {
+    static std::once_flag once;
+    std::call_once(once, [] {
+        struct sigaction sa{};
+        sa.sa_sigaction = fault_signal_handler;
+        // Do not use SA_NODEFER: the same fault must remain blocked while the
+        // handler is running to avoid recursive signal-handler entry.
+        sa.sa_flags = SA_SIGINFO;
+        sigemptyset(&sa.sa_mask);
+        sigaction(SIGBUS,  &sa, &g_prev_sigbus);
+        sigaction(SIGSEGV, &sa, &g_prev_sigsegv);
+    });
+}
 
 template<typename T>
 ReadResult<T> read(uintptr_t addr) noexcept {
@@ -63,7 +90,6 @@ ReadResult<T> read(uintptr_t addr) noexcept {
     if (alignof(T) > 1 && (addr & (alignof(T) - 1)))
         return { MemStatus::Misaligned };
 
-    // PAC-strip on arm64e before dereferencing stored pointers.
     addr = reinterpret_cast<uintptr_t>(
         LT_STRIP_PTR(reinterpret_cast<void*>(addr)));
 
@@ -75,7 +101,6 @@ ReadResult<T> read(uintptr_t addr) noexcept {
     return { MemStatus::Ok, val };
 }
 
-// Explicit instantiations for the most common types used by the bridge.
 template ReadResult<uint8_t>   read<uint8_t>(uintptr_t) noexcept;
 template ReadResult<uint16_t>  read<uint16_t>(uintptr_t) noexcept;
 template ReadResult<uint32_t>  read<uint32_t>(uintptr_t) noexcept;
@@ -89,13 +114,11 @@ template ReadResult<double>    read<double>(uintptr_t) noexcept;
 template ReadResult<uintptr_t> read<uintptr_t>(uintptr_t) noexcept;
 template ReadResult<void*>     read<void*>(uintptr_t) noexcept;
 
-// ------ Byte-level read -------------------------------------------------------
 MemStatus read_bytes(uintptr_t addr, void* out_buf, size_t count) noexcept {
     if (!addr || !out_buf) return MemStatus::NullAddress;
     if (count == 0) return MemStatus::Ok;
     if (count > 64 * 1024 * 1024) return MemStatus::TooLarge;
 
-    // For large reads, use vm_read_overwrite to avoid per-byte fault guards.
     if (count >= 64) {
         vm_size_t out_size = 0;
         kern_return_t kr = vm_read_overwrite(
@@ -105,7 +128,6 @@ MemStatus read_bytes(uintptr_t addr, void* out_buf, size_t count) noexcept {
             reinterpret_cast<vm_address_t>(out_buf),
             &out_size);
         if (kr == KERN_SUCCESS && out_size == count) return MemStatus::Ok;
-        // Fall through to guarded copy on failure.
     }
 
     FaultGuard guard;
@@ -115,7 +137,6 @@ MemStatus read_bytes(uintptr_t addr, void* out_buf, size_t count) noexcept {
     return MemStatus::Ok;
 }
 
-// ------ C string read --------------------------------------------------------
 std::optional<std::string> read_cstr(uintptr_t addr, size_t max_len) noexcept {
     if (!addr) return std::nullopt;
     std::string result;
@@ -134,11 +155,9 @@ std::optional<std::string> read_cstr(uintptr_t addr, size_t max_len) noexcept {
     return result;
 }
 
-// ------ IL2CPP string read ---------------------------------------------------
 std::optional<std::string> read_il2cpp_string(uintptr_t str_obj_addr) noexcept {
     if (!str_obj_addr) return std::nullopt;
 
-    // Read length (int32_t at +0x10)
     auto len_res = read<int32_t>(str_obj_addr + IL2CPP_STRING_LENGTH_OFFSET);
     if (!len_res.ok() || len_res.value <= 0 || len_res.value > 65536)
         return std::nullopt;
@@ -153,7 +172,6 @@ std::optional<std::string> read_il2cpp_string(uintptr_t str_obj_addr) noexcept {
 
     if (s != MemStatus::Ok) return std::nullopt;
 
-    // Convert UTF-16 LE to UTF-8
     std::string result;
     result.reserve(static_cast<size_t>(len));
     for (char16_t ch : chars) {
@@ -171,11 +189,9 @@ std::optional<std::string> read_il2cpp_string(uintptr_t str_obj_addr) noexcept {
     return result;
 }
 
-// ------ Pointer reads --------------------------------------------------------
 ReadResult<uintptr_t> read_ptr(uintptr_t addr) noexcept {
     auto r = read<uintptr_t>(addr);
     if (!r.ok()) return r;
-    // Strip PAC bits from the loaded pointer value itself.
     uintptr_t stripped = reinterpret_cast<uintptr_t>(
         LT_STRIP_PTR(reinterpret_cast<void*>(r.value)));
     return { MemStatus::Ok, stripped };
@@ -198,20 +214,18 @@ void read_scatter(std::span<ScatterEntry> entries) noexcept {
     }
 }
 
-// ------ Write implementation --------------------------------------------------
 template<typename T>
 WriteResult write(uintptr_t addr, T value) noexcept {
     if (!addr) return { MemStatus::NullAddress };
 
-    auto guard = elevate_rw(addr, sizeof(T));  // elevate if read-only (.text hooks etc.)
+    auto guard = elevate_rw(addr, sizeof(T));
+    if (!guard) return { MemStatus::ProtectFail };
 
     FaultGuard fg;
     int sig = sigsetjmp(g_fault_buf, 1);
     if (sig != 0) return { MemStatus::Fault };
 
     *reinterpret_cast<volatile T*>(addr) = value;
-
-    // Flush instruction cache for code patches (critical for hook installation).
     sys_icache_invalidate(reinterpret_cast<void*>(addr), sizeof(T));
     return { MemStatus::Ok };
 }
@@ -231,6 +245,7 @@ WriteResult write_bytes(uintptr_t addr, const void* data, size_t count) noexcept
     if (count == 0) return { MemStatus::Ok };
 
     auto guard = elevate_rw(addr, count);
+    if (!guard) return { MemStatus::ProtectFail };
 
     FaultGuard fg;
     int sig = sigsetjmp(g_fault_buf, 1);
@@ -248,6 +263,7 @@ WriteResult write_ptr(uintptr_t addr, uintptr_t value) noexcept {
 bool compare_and_write(uintptr_t addr, uint64_t expected, uint64_t desired) noexcept {
     if (!addr) return false;
     auto guard = elevate_rw(addr, sizeof(uint64_t));
+    if (!guard) return false;
     FaultGuard fg;
     int sig = sigsetjmp(g_fault_buf, 1);
     if (sig != 0) return false;
@@ -260,6 +276,7 @@ bool compare_and_write(uintptr_t addr, uint64_t expected, uint64_t desired) noex
 WriteResult patch_nop(uintptr_t addr, uint32_t count) noexcept {
     if (!addr || count == 0) return { MemStatus::NullAddress };
     auto guard = elevate_rwx(addr, count * 4);
+    if (!guard) return { MemStatus::ProtectFail };
     FaultGuard fg;
     int sig = sigsetjmp(g_fault_buf, 1);
     if (sig != 0) return { MemStatus::Fault };
@@ -271,57 +288,80 @@ WriteResult patch_nop(uintptr_t addr, uint32_t count) noexcept {
 }
 
 WriteResult patch_ret(uintptr_t addr) noexcept {
-    return write<uint32_t>(addr, 0xD65F03C0u);  // ARM64 RET
+    return write<uint32_t>(addr, 0xD65F03C0u);
 }
 
 // ------ Protection elevation -------------------------------------------------
-std::optional<ProtectGuard> elevate_rw(uintptr_t addr, size_t size) noexcept {
-    if (!addr) return std::nullopt;
-    const vm_size_t pg = vm_page_size;
-    uintptr_t base = addr & ~(pg - 1);
-    size_t len = ((addr + size + pg - 1) & ~(pg - 1)) - base;
 
-    vm_address_t  raddr = static_cast<vm_address_t>(base);
-    vm_size_t     rsize = 0;
+static bool page_range(uintptr_t addr, size_t size,
+                       uintptr_t& base, size_t& length) noexcept {
+    const uintptr_t page = static_cast<uintptr_t>(vm_page_size);
+    if (!addr || !size || !page || (page & (page - 1)) != 0) return false;
+    if (addr > std::numeric_limits<uintptr_t>::max() - size) return false;
+    const uintptr_t end = addr + size;
+    if (end > std::numeric_limits<uintptr_t>::max() - (page - 1)) return false;
+    base = addr & ~(page - 1);
+    const uintptr_t rounded_end = (end + page - 1) & ~(page - 1);
+    if (rounded_end <= base) return false;
+    const uintptr_t span = rounded_end - base;
+    length = static_cast<size_t>(span);
+    return true;
+}
+
+static bool query_single_region(uintptr_t base, size_t length,
+                                vm_prot_t& protection) noexcept {
+    vm_address_t region_addr = static_cast<vm_address_t>(base);
+    vm_size_t region_size = 0;
     vm_region_basic_info_data_64_t info{};
-    mach_msg_type_number_t info_count = VM_REGION_BASIC_INFO_COUNT_64;
-    mach_port_t object_name = MACH_PORT_NULL;
+    mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+    mach_port_t object = MACH_PORT_NULL;
+    const kern_return_t kr = vm_region_64(
+        mach_task_self(), &region_addr, &region_size, VM_REGION_BASIC_INFO_64,
+        reinterpret_cast<vm_region_info_t>(&info), &count, &object);
+    if (kr != KERN_SUCCESS || region_size == 0) return false;
+    const uintptr_t rb = static_cast<uintptr_t>(region_addr);
+    if (region_size > std::numeric_limits<uintptr_t>::max() - rb) return false;
+    const uintptr_t re = rb + static_cast<uintptr_t>(region_size);
+    if (rb > base || length > std::numeric_limits<uintptr_t>::max() - base ||
+        re < base + length) return false;
+    protection = info.protection;
+    return true;
+}
 
-    kern_return_t kr = vm_region_64(
-        mach_task_self(), &raddr, &rsize,
-        VM_REGION_BASIC_INFO_64,
-        reinterpret_cast<vm_region_info_t>(&info),
-        &info_count, &object_name);
+std::optional<ProtectGuard> elevate_rw(uintptr_t addr, size_t size) noexcept {
+    uintptr_t base = 0;
+    size_t length = 0;
+    if (!page_range(addr, size, base, length)) return std::nullopt;
 
+    vm_prot_t original = VM_PROT_NONE;
+    if (!query_single_region(base, length, original)) return std::nullopt;
+    if ((original & VM_PROT_READ) && (original & VM_PROT_WRITE))
+        return ProtectGuard{ base, length, original, true };
+
+    const kern_return_t kr = vm_protect(
+        mach_task_self(), static_cast<vm_address_t>(base),
+        static_cast<vm_size_t>(length), FALSE,
+        original | VM_PROT_READ | VM_PROT_WRITE);
     if (kr != KERN_SUCCESS) return std::nullopt;
-    const vm_prot_t orig = info.protection;
-    if ((orig & VM_PROT_WRITE) && (orig & VM_PROT_READ))
-        return ProtectGuard{ base, len, orig, true };  // already RW
-
-    kr = vm_protect(mach_task_self(), base, len, FALSE,
-                    orig | VM_PROT_READ | VM_PROT_WRITE);
-    if (kr != KERN_SUCCESS) return std::nullopt;
-    return ProtectGuard{ base, len, orig, true };
+    return ProtectGuard{ base, length, original, true };
 }
 
 std::optional<ProtectGuard> elevate_rwx(uintptr_t addr, size_t size) noexcept {
-    if (!addr) return std::nullopt;
-    const vm_size_t pg = vm_page_size;
-    uintptr_t base = addr & ~(pg - 1);
-    size_t len = ((addr + size + pg - 1) & ~(pg - 1)) - base;
-    kern_return_t kr = vm_protect(mach_task_self(), base, len, FALSE,
-                                  VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXECUTE);
-    if (kr != KERN_SUCCESS) return std::nullopt;
+    uintptr_t base = 0;
+    size_t length = 0;
+    if (!page_range(addr, size, base, length)) return std::nullopt;
 
-    // Query original for RAII restore
-    vm_address_t raddr = base;
-    vm_size_t rsize = 0;
-    vm_region_basic_info_data_64_t info{};
-    mach_msg_type_number_t cnt = VM_REGION_BASIC_INFO_COUNT_64;
-    mach_port_t obj = MACH_PORT_NULL;
-    vm_region_64(mach_task_self(), &raddr, &rsize, VM_REGION_BASIC_INFO_64,
-                 reinterpret_cast<vm_region_info_t>(&info), &cnt, &obj);
-    return ProtectGuard{ base, len, info.protection, true };
+    // Query before changing protection. Never guess the original protection:
+    // restoring a guessed value can leave code pages writable or corrupt VM state.
+    vm_prot_t original = VM_PROT_NONE;
+    if (!query_single_region(base, length, original)) return std::nullopt;
+
+    const kern_return_t kr = vm_protect(
+        mach_task_self(), static_cast<vm_address_t>(base),
+        static_cast<vm_size_t>(length), FALSE,
+        VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXECUTE);
+    if (kr != KERN_SUCCESS) return std::nullopt;
+    return ProtectGuard{ base, length, original, true };
 }
 
 ProtectGuard::~ProtectGuard() noexcept {
@@ -378,28 +418,42 @@ std::optional<uintptr_t> image_slide(const char* name_substr) noexcept {
     return std::nullopt;
 }
 
+static bool range_has_protection(uintptr_t addr, size_t size,
+                                 vm_prot_t required) noexcept {
+    if (!addr) return false;
+    if (size == 0) return true;
+    if (addr > std::numeric_limits<uintptr_t>::max() - size) return false;
+    const uintptr_t end = addr + size;
+    uintptr_t cursor = addr;
+
+    while (cursor < end) {
+        vm_address_t region_addr = static_cast<vm_address_t>(cursor);
+        vm_size_t region_size = 0;
+        vm_region_basic_info_data_64_t info{};
+        mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+        mach_port_t object = MACH_PORT_NULL;
+        const kern_return_t kr = vm_region_64(
+            mach_task_self(), &region_addr, &region_size, VM_REGION_BASIC_INFO_64,
+            reinterpret_cast<vm_region_info_t>(&info), &count, &object);
+        if (kr != KERN_SUCCESS || region_size == 0) return false;
+
+        const uintptr_t region_begin = static_cast<uintptr_t>(region_addr);
+        if (region_size > std::numeric_limits<uintptr_t>::max() - region_begin)
+            return false;
+        const uintptr_t region_end = region_begin + static_cast<uintptr_t>(region_size);
+        if (region_begin > cursor || region_end <= cursor ||
+            (info.protection & required) != required) return false;
+        cursor = std::min(end, region_end);
+    }
+    return true;
+}
+
 bool is_readable(uintptr_t addr, size_t size) noexcept {
-    vm_address_t raddr = static_cast<vm_address_t>(addr & ~(vm_page_size - 1));
-    vm_size_t rsize = 0;
-    vm_region_basic_info_data_64_t info{};
-    mach_msg_type_number_t cnt = VM_REGION_BASIC_INFO_COUNT_64;
-    mach_port_t obj = MACH_PORT_NULL;
-    kern_return_t kr = vm_region_64(mach_task_self(), &raddr, &rsize,
-        VM_REGION_BASIC_INFO_64,
-        reinterpret_cast<vm_region_info_t>(&info), &cnt, &obj);
-    return kr == KERN_SUCCESS && (info.protection & VM_PROT_READ);
+    return range_has_protection(addr, size, VM_PROT_READ);
 }
 
 bool is_writable(uintptr_t addr, size_t size) noexcept {
-    vm_address_t raddr = static_cast<vm_address_t>(addr & ~(vm_page_size - 1));
-    vm_size_t rsize = 0;
-    vm_region_basic_info_data_64_t info{};
-    mach_msg_type_number_t cnt = VM_REGION_BASIC_INFO_COUNT_64;
-    mach_port_t obj = MACH_PORT_NULL;
-    kern_return_t kr = vm_region_64(mach_task_self(), &raddr, &rsize,
-        VM_REGION_BASIC_INFO_64,
-        reinterpret_cast<vm_region_info_t>(&info), &cnt, &obj);
-    return kr == KERN_SUCCESS && (info.protection & VM_PROT_WRITE);
+    return range_has_protection(addr, size, VM_PROT_WRITE);
 }
 
 bool is_executable(uintptr_t addr) noexcept {
