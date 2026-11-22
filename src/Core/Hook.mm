@@ -8,7 +8,8 @@
 #include "LibTool/Hook.hpp"
 #include "LibTool/Memory.hpp"
 #include "LibTool/Config.hpp"
-#include <mach/mach_vm.h>
+#include <mach/vm_map.h>
+#include <libkern/OSCacheControl.h>
 #include <sys/mman.h>
 #include <cstring>
 #include <cstdio>
@@ -50,14 +51,14 @@ static uintptr_t alloc_trampoline(size_t bytes, uintptr_t near_addr) {
     for (int64_t delta = -(1 << 22); delta < (1 << 22); delta += 4096) {
         uintptr_t try_addr = (near_addr & ~(uintptr_t)4095) + delta;
         if (try_addr == 0) continue;
-        mach_vm_address_t addr = try_addr;
-        kern_return_t kr = mach_vm_allocate(mach_task_self(), &addr,
+        vm_address_t addr = static_cast<vm_address_t>(try_addr);
+        kern_return_t kr = vm_allocate(mach_task_self(), &addr,
                                              TRAMP_PAGE_SIZE, VM_FLAGS_FIXED);
         if (kr != KERN_SUCCESS) continue;
         kr = vm_protect(mach_task_self(), addr, TRAMP_PAGE_SIZE, FALSE,
                         VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXECUTE);
         if (kr != KERN_SUCCESS) {
-            mach_vm_deallocate(mach_task_self(), addr, TRAMP_PAGE_SIZE);
+            vm_deallocate(mach_task_self(), addr, TRAMP_PAGE_SIZE);
             continue;
         }
         g_tramp_pages.push_back({ static_cast<uintptr_t>(addr), 0, TRAMP_PAGE_SIZE });
@@ -68,7 +69,7 @@ static uintptr_t alloc_trampoline(size_t bytes, uintptr_t near_addr) {
     }
 
     // Any page (far) — caller must use register-indirect branch
-    mach_vm_address_t addr = 0;
+    vm_address_t addr = 0;
     mach_vm_allocate(mach_task_self(), &addr, TRAMP_PAGE_SIZE,
                      VM_FLAGS_ANYWHERE);
     vm_protect(mach_task_self(), addr, TRAMP_PAGE_SIZE, FALSE,
@@ -138,8 +139,7 @@ uint32_t relocate_insn(uint32_t insn, uintptr_t old_pc, uintptr_t new_pc) noexce
     // --- LDR literal (32/64-bit, bits [31:30,26] in {0b00,1},{0b01,1},{0b10,1}) ---
     // Encoding: 0bxx011000_xxxxxxxx_xxxxxxxx_xxxxx_ttttt  (opc=0b00/0b01/0b10, V=0)
     if ((insn & 0x3B000000u) == 0x18000000u) {
-        uint32_t Rt      = insn & 0x1Fu;
-        int64_t  old_imm = static_cast<int64_t>((insn >> 5) & 0x7FFFFu) << 2;
+                int64_t  old_imm = static_cast<int64_t>((insn >> 5) & 0x7FFFFu) << 2;
         if (old_imm & (1LL << 20)) old_imm |= ~((1LL << 21) - 1);
         uintptr_t target  = old_pc + static_cast<uintptr_t>(old_imm);
         int64_t   new_imm = static_cast<int64_t>(target) - static_cast<int64_t>(new_pc);
@@ -203,7 +203,7 @@ install(uintptr_t target_addr, uintptr_t hook_fn,
     // Far  patch:  LDR X16, #8 / BR X16 / .quad  (12 bytes = 3 instructions)
     int64_t delta = static_cast<int64_t>(hook_fn) - static_cast<int64_t>(target_addr);
     bool near = (delta >= -(1LL << 27) && delta < (1LL << 27));
-    uint32_t patch_size = near ? 4u : 12u;
+    uint32_t patch_size = near ? 4u : 16u;
     uint32_t save_insns = (patch_size + 3) / 4;  // round up to instruction boundary
 
     // Also save enough for safe relocation (always save at least 4 insns = 16 bytes)
@@ -266,7 +266,7 @@ install(uintptr_t target_addr, uintptr_t hook_fn,
     }
 
     // --- Write trampoline to scratch page ------------------------------------
-    lt::mem::write_bytes(tramp_base, relocated.data(), relocated.size() * 4);
+    if (!lt::mem::write_bytes(tramp_base, relocated.data(), relocated.size() * 4).ok()) return std::nullopt;
     sys_icache_invalidate(reinterpret_cast<void*>(tramp_base), relocated.size() * 4);
 
     // --- Save original bytes and write patch at target -----------------------
@@ -281,7 +281,7 @@ install(uintptr_t target_addr, uintptr_t hook_fn,
     std::snprintf(rec.label, sizeof(rec.label), "%s", label ? label : "hook");
 
     // Read original bytes for disable/restore
-    lt::mem::read_bytes(target_addr, rec.saved_bytes, save_insns * 4);
+    if (lt::mem::read_bytes(target_addr, rec.saved_bytes, save_insns * 4) != lt::mem::MemStatus::Ok) return std::nullopt;
 
     // Write the hook patch
     {
@@ -289,14 +289,12 @@ install(uintptr_t target_addr, uintptr_t hook_fn,
         if (near) {
             int64_t br_delta = static_cast<int64_t>(hook_fn) - static_cast<int64_t>(target_addr);
             uint32_t b_hook = 0x14000000u | (static_cast<uint32_t>(br_delta >> 2) & 0x03FFFFFFu);
-            lt::mem::write<uint32_t>(target_addr, b_hook);
+            (void)lt::mem::write<uint32_t>(target_addr, b_hook);
         } else {
-            uint32_t far[3];
-            far[0] = 0x58000050u;   // LDR X16, #8
-            far[1] = 0xD61F0200u;   // BR X16
+            uint32_t far[4] = { 0x58000050u, 0xD61F0200u, 0, 0 }; // LDR X16, #8; BR X16; .quad
             uint64_t abs = static_cast<uint64_t>(hook_fn);
-            std::memcpy(&far[2], &abs, 8);
-            lt::mem::write_bytes(target_addr, far, patch_size);
+            std::memcpy(&far[2], &abs, sizeof(abs));
+            (void)lt::mem::write_bytes(target_addr, far, patch_size);
         }
     }
     sys_icache_invalidate(reinterpret_cast<void*>(target_addr), patch_size);
@@ -328,8 +326,8 @@ install_got(uintptr_t got_slot_addr, uintptr_t hook_fn, const char* label) noexc
     rec.status = HookStatus::Active;
     rec.saved_count = 8;
     std::snprintf(rec.label, sizeof(rec.label), "%s", label ? label : "got");
-    lt::mem::read_bytes(got_slot_addr, rec.saved_bytes, 8);
-    lt::mem::write_ptr(got_slot_addr, hook_fn);
+    (void)lt::mem::read_bytes(got_slot_addr, rec.saved_bytes, 8);
+    (void)lt::mem::write_ptr(got_slot_addr, hook_fn);
 
     for (auto& slot : g_hooks) {
         if (slot.id == 0) { slot = rec; break; }
@@ -353,8 +351,8 @@ uint32_t patch_nop(uintptr_t addr, uint32_t count, const char* label) noexcept {
     rec.status = HookStatus::Active;
     rec.saved_count = static_cast<uint8_t>(std::min<uint32_t>(count * 4, 20));
     std::snprintf(rec.label, sizeof(rec.label), "%s", label ? label : "nop");
-    lt::mem::read_bytes(addr, rec.saved_bytes, rec.saved_count);
-    lt::mem::patch_nop(addr, count);
+    (void)lt::mem::read_bytes(addr, rec.saved_bytes, rec.saved_count);
+    (void)lt::mem::patch_nop(addr, count);
     for (auto& slot : g_hooks) { if (slot.id == 0) { slot = rec; break; } }
     return rec.id;
 }
@@ -370,8 +368,8 @@ uint32_t patch_ret(uintptr_t addr, const char* label) noexcept {
     rec.status = HookStatus::Active;
     rec.saved_count = 4;
     std::snprintf(rec.label, sizeof(rec.label), "%s", label ? label : "ret");
-    lt::mem::read_bytes(addr, rec.saved_bytes, 4);
-    lt::mem::patch_ret(addr);
+    (void)lt::mem::read_bytes(addr, rec.saved_bytes, 4);
+    (void)lt::mem::patch_ret(addr);
     for (auto& slot : g_hooks) { if (slot.id == 0) { slot = rec; break; } }
     return rec.id;
 }
@@ -381,7 +379,7 @@ bool disable(uint32_t hook_id) noexcept {
     for (auto& rec : g_hooks) {
         if (rec.id != hook_id) continue;
         if (rec.status != HookStatus::Active) return false;
-        lt::mem::write_bytes(rec.target, rec.saved_bytes, rec.saved_count);
+        if (!lt::mem::write_bytes(rec.target, rec.saved_bytes, rec.saved_count).ok()) return false;
         sys_icache_invalidate(reinterpret_cast<void*>(rec.target), rec.saved_count);
         rec.status = HookStatus::Disabled;
         return true;
@@ -396,12 +394,12 @@ bool enable(uint32_t hook_id) noexcept {
         if (rec.status != HookStatus::Disabled) return false;
         // Re-install the hook patch
         if (rec.kind == HookKind::GOT || rec.kind == HookKind::VTable) {
-            lt::mem::write_ptr(rec.target, rec.hook_fn);
+            (void)lt::mem::write_ptr(rec.target, rec.hook_fn);
         } else {
             int64_t delta = static_cast<int64_t>(rec.hook_fn) - static_cast<int64_t>(rec.target);
             if (delta >= -(1LL<<27) && delta < (1LL<<27)) {
                 uint32_t b = 0x14000000u | (static_cast<uint32_t>(delta >> 2) & 0x03FFFFFFu);
-                lt::mem::write<uint32_t>(rec.target, b);
+                (void)lt::mem::write<uint32_t>(rec.target, b);
             }
         }
         sys_icache_invalidate(reinterpret_cast<void*>(rec.target), rec.saved_count);
