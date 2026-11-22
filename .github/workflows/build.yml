@@ -1,1 +1,133 @@
-test
+name: SimpleXLibTool — iOS Dylib Build
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'vendor/**'
+      - 'Makefile'
+      - 'control'
+      - 'scripts/**'
+      - 'tests/**'
+      - '.github/workflows/build.yml'
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: libtool-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Install Linux build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential clang llvm lld dpkg-dev fakeroot \
+            perl python3 git curl unzip xz-utils file
+          make --version | head -1
+          clang --version | head -1
+
+      - name: Install Theos
+        run: |
+          set -euo pipefail
+          git clone --recursive --depth 1 \
+            https://github.com/theos/theos.git "$HOME/theos"
+          test -f "$HOME/theos/makefiles/common.mk"
+          echo "THEOS=$HOME/theos" >> "$GITHUB_ENV"
+
+      - name: Install iOS SDKs for cross-compilation
+        run: |
+          set -euo pipefail
+          if ! compgen -G "$HOME/theos/sdks/iPhoneOS*.sdk" >/dev/null; then
+            rm -rf "$HOME/theos/sdks"
+            git clone --depth 1 https://github.com/theos/sdks.git "$HOME/theos/sdks"
+          fi
+          find "$HOME/theos/sdks" -maxdepth 1 -type d -name 'iPhoneOS*.sdk' -print
+          compgen -G "$HOME/theos/sdks/iPhoneOS*.sdk" >/dev/null
+
+      - name: Fetch and verify vendor sources
+        run: |
+          set -euo pipefail
+          bash scripts/fetch-vendor.sh
+
+      - name: Run static checks
+        run: |
+          set -euo pipefail
+          bash tests/static_checks.sh
+
+      - name: Build dylib
+        run: |
+          set -euo pipefail
+          make clean
+          make all FINALPACKAGE=1 DEBUG=0
+          DYLIB="$(find .theos -type f -name 'LibTool.dylib' -print -quit)"
+          if [[ -z "$DYLIB" ]]; then
+            echo "::error::LibTool.dylib not produced"
+            find .theos -maxdepth 8 -type f -print || true
+            exit 1
+          fi
+          mkdir -p dist
+          cp "$DYLIB" dist/LibTool.dylib
+
+      - name: Inspect Mach-O output
+        run: |
+          set -euo pipefail
+          file dist/LibTool.dylib
+          LLVM_LIPO="$(command -v llvm-lipo || find /usr/bin -maxdepth 1 -name 'llvm-lipo-*' -print -quit)"
+          LLVM_OBJDUMP="$(command -v llvm-objdump)"
+          LLVM_NM="$(command -v llvm-nm)"
+          test -n "$LLVM_LIPO"
+          "$LLVM_LIPO" -info dist/LibTool.dylib
+          "$LLVM_OBJDUMP" --macho --private-headers dist/LibTool.dylib | grep -q 'MH_DYLIB'
+          "$LLVM_OBJDUMP" --macho --dylibs-used dist/LibTool.dylib
+          "$LLVM_NM" --extern-only --defined-only dist/LibTool.dylib | head -40
+
+      - name: Verify expected slices
+        run: |
+          set -euo pipefail
+          LLVM_LIPO="$(command -v llvm-lipo || find /usr/bin -maxdepth 1 -name 'llvm-lipo-*' -print -quit)"
+          test -n "$LLVM_LIPO"
+          "$LLVM_LIPO" -verify_arch arm64 dist/LibTool.dylib || \
+            { echo "::error::Missing arm64 slice"; exit 1; }
+          "$LLVM_LIPO" -verify_arch arm64e dist/LibTool.dylib || \
+            { echo "::error::Missing arm64e slice"; exit 1; }
+
+      - name: Verify exported symbols
+        run: |
+          set -euo pipefail
+          EXPORTS="$(llvm-nm --extern-only --defined-only dist/LibTool.dylib | grep -v LTStartOverlay || true)"
+          if [[ -n "$EXPORTS" ]]; then
+            echo "Warning: unexpected exported symbols:"
+            echo "$EXPORTS"
+          fi
+
+      - name: Compute checksums
+        run: |
+          set -euo pipefail
+          sha256sum dist/LibTool.dylib | tee dist/SHA256SUMS.txt
+          cat dist/SHA256SUMS.txt
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: LibTool-iOS-dylib-${{ github.sha }}
+          path: |
+            dist/LibTool.dylib
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
