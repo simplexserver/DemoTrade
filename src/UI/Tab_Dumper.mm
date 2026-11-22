@@ -1,134 +1,217 @@
 // language: Objective-C++, file: src/UI/Tab_Dumper.mm, target: iOS arm64/arm64e
 // Dumper tab — assembly image list, class filter, dump.cs export.
+// IL2CPP work runs on an attached worker thread; the ImGui thread only renders snapshots.
 
+#import <Foundation/Foundation.h>
 #include "LibTool/Overlay.hpp"
 #include "LibTool/IL2CPP.hpp"
 #include "LibTool/LuaRuntime.hpp"
 #include "LibTool/Config.hpp"
 #include "imgui.h"
 #include <cstdio>
+#include <algorithm>
+#include <utility>
 #include <cstring>
 #include <vector>
 #include <string>
 #include <atomic>
 #include <thread>
+#include <mutex>
 #include <cstdlib>
 
 namespace lt::ui {
 
-static char  g_dump_filter[128]{};
-static bool  g_dump_running{ false };
-static float g_dump_progress{ 0.0f };
-static size_t g_dump_found{ 0 };
-static std::vector<std::pair<std::string, size_t>> g_image_list; // name, class count
-static bool g_images_fetched{ false };
-static int  g_sel_image{ 0 };
+struct DumpImage {
+    const Il2CppImage* image{ nullptr };
+    std::string name;
+    size_t class_count{ 0 };
+};
+
+static char g_dump_filter[128]{};
+static std::atomic<bool> g_dump_running{false};
+static std::atomic<float> g_dump_progress{0.0f};
+static std::atomic<size_t> g_dump_found{0};
+
+static std::mutex g_image_mutex;
+static std::vector<DumpImage> g_image_list;
+static std::atomic<bool> g_images_fetched{false};
+static std::atomic<bool> g_images_loading{false};
+static int g_sel_image{0};
 
 static void refresh_images() {
-    g_image_list.clear();
-    for (auto& [img, name] : lt::il2cpp::all_images()) {
-        size_t cnt = lt::il2cpp::api().image_get_class_count
-            ? lt::il2cpp::api().image_get_class_count(img) : 0;
-        g_image_list.push_back({ name, cnt });
-    }
-    g_images_fetched = true;
+    bool expected = false;
+    if (!g_images_loading.compare_exchange_strong(expected, true)) return;
+
+    std::thread([] {
+        @autoreleasepool {
+            lt::il2cpp::Il2CppThreadScope thread_scope;
+            const auto images = lt::il2cpp::all_images();
+
+            std::vector<DumpImage> next;
+            next.reserve(images.size());
+            for (const auto& entry : images) {
+                DumpImage item;
+                item.image = entry.first;
+                item.name = entry.second;
+                item.class_count = lt::il2cpp::api().image_get_class_count
+                    ? lt::il2cpp::api().image_get_class_count(item.image) : 0;
+                next.push_back(std::move(item));
+            }
+
+            {
+                std::lock_guard<std::mutex> lock(g_image_mutex);
+                g_image_list = std::move(next);
+            }
+            g_images_fetched.store(true, std::memory_order_release);
+            g_images_loading.store(false, std::memory_order_release);
+        }
+    }).detach();
 }
 
-static void run_dump(int image_idx) {
-    g_dump_running  = true;
-    g_dump_progress = 0.0f;
-    g_dump_found    = 0;
+static void run_dump(int image_idx, std::string filter) {
+    bool expected = false;
+    if (!g_dump_running.compare_exchange_strong(expected, true)) return;
 
-    auto images = lt::il2cpp::all_images();
-    if (image_idx < 0 || image_idx >= (int)images.size()) {
-        g_dump_running = false; return;
-    }
-    const auto image_entry = images[image_idx];
-    const Il2CppImage* img = image_entry.first;
-    const std::string iname = image_entry.second;
+    g_dump_progress.store(0.0f, std::memory_order_release);
+    g_dump_found.store(0, std::memory_order_release);
 
-    std::thread([img, iname]() {
-        const char* home = std::getenv("HOME");
-        const std::string path = home && *home
-            ? std::string(home) + "/Documents/dump.cs"
-            : "/tmp/dump.cs";
-        FILE* f = std::fopen(path.c_str(), "w");
-        if (!f) { g_dump_running = false; return; }
-
-        fprintf(f, "// SimpleXLibTool v%s — Dump\n// Image: %s\n\n",
-                LT_VERSION_STR, iname.c_str());
-
-        size_t total = lt::il2cpp::api().image_get_class_count
-            ? lt::il2cpp::api().image_get_class_count(img) : 0;
-
-        for (size_t i = 0; i < total; ++i) {
-            g_dump_progress = total ? (float)i / total : 0.0f;
-            if (!lt::il2cpp::api().image_get_class) break;
-            Il2CppClass* k = lt::il2cpp::api().image_get_class(img, i);
-            if (!k) continue;
-
-            lt::il2cpp::ClassHandle ch{ k, lt::il2cpp::detected_version() };
-            std::string fullname = ch.full_name();
-            if (g_dump_filter[0] &&
-                fullname.find(g_dump_filter) == std::string::npos) continue;
-
-            fprintf(f, "// Class: %s (size 0x%X)\n", fullname.c_str(), ch.instance_size());
-            for (auto& fd : ch.fields()) {
-                fprintf(f, "    [%s 0x%zX] %s %s\n",
-                        fd.is_static ? "static" : "field",
-                        fd.offset, fd.type_name.c_str(), fd.name.c_str());
+    std::thread([image_idx, filter = std::move(filter)]() {
+        @autoreleasepool {
+            lt::il2cpp::Il2CppThreadScope thread_scope;
+            const auto images = lt::il2cpp::all_images();
+            if (image_idx < 0 || image_idx >= static_cast<int>(images.size())) {
+                g_dump_running.store(false, std::memory_order_release);
+                return;
             }
-            for (auto& md : ch.methods()) {
-                uintptr_t ptr = lt::il2cpp::method_ptr(md.info);
-                fprintf(f, "    // RVA: 0x%llX  %s\n",
-                        (unsigned long long)ptr, md.signature.c_str());
+
+            const Il2CppImage* image = images[static_cast<size_t>(image_idx)].first;
+            const std::string image_name = images[static_cast<size_t>(image_idx)].second;
+
+            const char* home = std::getenv("HOME");
+            const std::string path = home && *home
+                ? std::string(home) + "/Documents/dump.cs"
+                : "/tmp/dump.cs";
+            FILE* file = std::fopen(path.c_str(), "w");
+            if (!file) {
+                lt::lua::console_append("[ERR] Dumper could not open output file.");
+                g_dump_running.store(false, std::memory_order_release);
+                return;
             }
-            fprintf(f, "\n");
-            ++g_dump_found;
+
+            fprintf(file, "// SimpleXLibTool v%s — Dump\n// Image: %s\n\n",
+                    LT_VERSION_STR, image_name.c_str());
+
+            const size_t total = lt::il2cpp::api().image_get_class_count
+                ? lt::il2cpp::api().image_get_class_count(image) : 0;
+
+            for (size_t i = 0; i < total; ++i) {
+                if (!lt::il2cpp::api().image_get_class) break;
+
+                Il2CppClass* klass = lt::il2cpp::api().image_get_class(image, i);
+                if (!klass) continue;
+
+                lt::il2cpp::ClassHandle handle{ klass, lt::il2cpp::detected_version() };
+                const std::string full_name = handle.full_name();
+                if (!filter.empty() &&
+                    full_name.find(filter) == std::string::npos) {
+                    g_dump_progress.store(total ? static_cast<float>(i + 1) / total : 1.0f,
+                                          std::memory_order_release);
+                    continue;
+                }
+
+                fprintf(file, "// Class: %s (size 0x%X)\n",
+                        full_name.c_str(), handle.instance_size());
+
+                for (const auto& field : handle.fields()) {
+                    fprintf(file, "    [%s 0x%zX] %s %s\n",
+                            field.is_static ? "static" : "field",
+                            field.offset, field.type_name.c_str(), field.name.c_str());
+                }
+                for (const auto& method : handle.methods()) {
+                    const uintptr_t ptr = lt::il2cpp::method_ptr(method.info);
+                    fprintf(file, "    // RVA: 0x%llX  %s\n",
+                            static_cast<unsigned long long>(ptr), method.signature.c_str());
+                }
+
+                fprintf(file, "\n");
+                g_dump_found.fetch_add(1, std::memory_order_relaxed);
+                g_dump_progress.store(total ? static_cast<float>(i + 1) / total : 1.0f,
+                                      std::memory_order_release);
+            }
+
+            std::fclose(file);
+            g_dump_progress.store(1.0f, std::memory_order_release);
+            g_dump_running.store(false, std::memory_order_release);
+            lt::lua::console_append(
+                "[Dumper] Wrote " +
+                std::to_string(g_dump_found.load(std::memory_order_acquire)) +
+                " classes to dump.cs");
         }
-        fclose(f);
-        g_dump_progress = 1.0f;
-        g_dump_running  = false;
-        lt::lua::console_append(
-            "[Dumper] Wrote " + std::to_string(g_dump_found) + " classes to dump.cs");
     }).detach();
 }
 
 void draw_tab_dumper() noexcept {
     if (!lt::il2cpp::api().resolved) {
-        ImGui::TextDisabled("IL2CPP not resolved."); return;
+        ImGui::TextDisabled("IL2CPP not resolved.");
+        return;
     }
 
-    float aw = ImGui::GetContentRegionAvail().x;
+    const float aw = ImGui::GetContentRegionAvail().x;
 
-    if (!g_images_fetched || ImGui::Button("Refresh##dump", { 70, 22 }))
+    if (ImGui::Button("Refresh##dump", { 82, 24 })) {
+        g_images_fetched.store(false, std::memory_order_release);
         refresh_images();
-
+    }
     ImGui::SameLine(0, 8);
-    ImGui::SetNextItemWidth(aw - 80);
+    ImGui::SetNextItemWidth(std::max(80.0f, aw - 92.0f));
     ImGui::InputText("Filter##dumpf", g_dump_filter, sizeof(g_dump_filter));
+
+    if (!g_images_fetched.load(std::memory_order_acquire) &&
+        !g_images_loading.load(std::memory_order_acquire)) {
+        refresh_images();
+    }
+    if (g_images_loading.load(std::memory_order_acquire)) {
+        ImGui::TextDisabled("Loading assemblies on worker thread...");
+    }
     ImGui::Separator();
 
-    // Image list
-    ImGui::BeginChild("##img_list", { 0, ImGui::GetContentRegionAvail().y * 0.55f }, true);
-    for (int i = 0; i < (int)g_image_list.size(); ++i) {
-        auto& [name, cnt] = g_image_list[i];
-        char lbl[256];
-        snprintf(lbl, sizeof(lbl), "%s | %zu classes", name.c_str(), cnt);
-        bool sel = (g_sel_image == i);
-        if (ImGui::Selectable(lbl, sel)) g_sel_image = i;
+    std::vector<DumpImage> visible_images;
+    {
+        std::lock_guard<std::mutex> lock(g_image_mutex);
+        visible_images = g_image_list;
+    }
+
+    ImGui::BeginChild("##img_list",
+                      { 0, ImGui::GetContentRegionAvail().y * 0.55f },
+                      true);
+    for (int i = 0; i < static_cast<int>(visible_images.size()); ++i) {
+        const auto& item = visible_images[static_cast<size_t>(i)];
+        char label[256];
+        std::snprintf(label, sizeof(label), "%s  ·  %zu classes",
+                      item.name.c_str(), item.class_count);
+        const bool selected = (g_sel_image == i);
+        if (ImGui::Selectable(label, selected)) g_sel_image = i;
     }
     ImGui::EndChild();
 
-    ImGui::Separator();
-    ScanProgress(g_dump_progress, g_dump_found, g_dump_running);
-    ImGui::Spacing();
+    if (g_sel_image >= static_cast<int>(visible_images.size()))
+        g_sel_image = visible_images.empty() ? 0 : static_cast<int>(visible_images.size() - 1);
 
-    if (!g_dump_running) {
-        if (ImGui::Button("Export dump.cs", { aw * 0.6f, 28 }))
-            run_dump(g_sel_image);
-        ImGui::SameLine(0, 6);
-        if (ImGui::Button("Copy path", { aw * 0.35f, 28 })) {
+    ImGui::Separator();
+    ScanProgress(g_dump_progress.load(std::memory_order_acquire),
+                 g_dump_found.load(std::memory_order_acquire),
+                 g_dump_running.load(std::memory_order_acquire));
+
+    if (!g_dump_running.load(std::memory_order_acquire)) {
+        const bool can_export = g_images_fetched.load(std::memory_order_acquire) &&
+                                !visible_images.empty();
+        ImGui::BeginDisabled(!can_export);
+        if (ImGui::Button("Export dump.cs", { aw * 0.60f, 30 })) {
+            run_dump(g_sel_image, std::string(g_dump_filter));
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine(0, 8);
+        if (ImGui::Button("Copy path", { aw * 0.35f, 30 })) {
             const char* home = std::getenv("HOME");
             const std::string path = home && *home
                 ? std::string(home) + "/Documents/dump.cs"
@@ -136,10 +219,9 @@ void draw_tab_dumper() noexcept {
             ImGui::SetClipboardText(path.c_str());
         }
     } else {
-        ImGui::TextDisabled("Dumping — please wait...");
+        ImGui::TextDisabled("Exporting metadata in background...");
     }
 
-    ImGui::Spacing();
     ImGui::TextDisabled("Output: Documents/dump.cs");
 }
 

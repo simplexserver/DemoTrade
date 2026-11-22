@@ -29,6 +29,8 @@ static dispatch_queue_t   g_lua_queue{ nullptr };
 static std::atomic<bool>  g_running{ false };
 static std::vector<std::string> g_console;
 static std::mutex               g_console_mutex;
+// Lua states are not thread-safe. Serialize the render callback and queued VM work.
+static std::recursive_mutex      g_lua_state_mutex;
 
 void console_append(std::string line) noexcept {
     std::lock_guard lock(g_console_mutex);
@@ -57,6 +59,7 @@ static int lua_print_impl(lua_State* L) {
 }
 
 bool initialize() noexcept {
+    std::lock_guard<std::recursive_mutex> lock(g_lua_state_mutex);
     if (g_L) return true;
     g_lua_queue = dispatch_queue_create("lt.lua", DISPATCH_QUEUE_SERIAL);
     if (!g_lua_queue) return false;
@@ -89,15 +92,27 @@ bool initialize() noexcept {
 }
 
 void shutdown() noexcept {
+    std::lock_guard<std::recursive_mutex> lock(g_lua_state_mutex);
     g_running.store(false);
     if (g_L) { lua_close(g_L); g_L = nullptr; }
 }
 
 bool run_script(std::string_view source) noexcept {
-    if (!g_L) return false;
     std::string src(source);
-    g_running.store(true);
-    dispatch_async(g_lua_queue, ^{
+    dispatch_queue_t queue = nullptr;
+    {
+        std::lock_guard<std::recursive_mutex> lock(g_lua_state_mutex);
+        if (!g_L || !g_lua_queue) return false;
+        queue = g_lua_queue;
+        g_running.store(true);
+    }
+
+    dispatch_async(queue, ^{
+        std::lock_guard<std::recursive_mutex> lock(g_lua_state_mutex);
+        if (!g_L) {
+            g_running.store(false);
+            return;
+        }
         int err = luaL_loadbuffer(g_L, src.c_str(), src.size(), "script");
         if (err == LUA_OK) {
             console_append("UI script loaded");
@@ -109,7 +124,7 @@ bool run_script(std::string_view source) noexcept {
             lua_pop(g_L, 1);
         }
         lua_getglobal(g_L, "OnDraw");
-        bool has = lua_isfunction(g_L, -1);
+        const bool has = lua_isfunction(g_L, -1);
         lua_pop(g_L, 1);
         if (!has) g_running.store(false);
     });
@@ -118,8 +133,15 @@ bool run_script(std::string_view source) noexcept {
 
 void stop_script() noexcept {
     g_running.store(false);
-    if (!g_L) return;
-    dispatch_async(g_lua_queue, ^{
+    dispatch_queue_t queue = nullptr;
+    {
+        std::lock_guard<std::recursive_mutex> lock(g_lua_state_mutex);
+        if (!g_L || !g_lua_queue) return;
+        queue = g_lua_queue;
+    }
+    dispatch_async(queue, ^{
+        std::lock_guard<std::recursive_mutex> lock(g_lua_state_mutex);
+        if (!g_L) return;
         lua_pushnil(g_L); lua_setglobal(g_L, "OnDraw");
         lua_pushnil(g_L); lua_setglobal(g_L, "OnUpdate");
     });
@@ -127,6 +149,7 @@ void stop_script() noexcept {
 }
 
 void dispatch_on_draw() noexcept {
+    std::lock_guard<std::recursive_mutex> lock(g_lua_state_mutex);
     if (!g_L || !g_running.load()) return;
     lua_getglobal(g_L, "OnDraw");
     if (!lua_isfunction(g_L, -1)) { lua_pop(g_L, 1); return; }
@@ -138,6 +161,7 @@ void dispatch_on_draw() noexcept {
 }
 
 void dispatch_on_update() noexcept {
+    std::lock_guard<std::recursive_mutex> lock(g_lua_state_mutex);
     if (!g_L || !g_running.load()) return;
     lua_getglobal(g_L, "OnUpdate");
     if (!lua_isfunction(g_L, -1)) { lua_pop(g_L, 1); return; }
@@ -149,6 +173,7 @@ bool is_running() noexcept { return g_running.load(); }
 lua_State* state() noexcept { return g_L; }
 
 std::string eval_string(std::string_view expr) noexcept {
+    std::lock_guard<std::recursive_mutex> lock(g_lua_state_mutex);
     if (!g_L) return "";
     std::string code = "return tostring(" + std::string(expr) + ")";
     if (luaL_dostring(g_L, code.c_str()) == LUA_OK) {

@@ -33,6 +33,7 @@ struct Api {
     // Domain / threading
     Il2CppDomain*          (*domain_get)();
     void*                  (*thread_attach)(Il2CppDomain*);
+    void*                  (*thread_current)();
     void                   (*thread_detach)(void*);
 
     // Assembly enumeration
@@ -106,11 +107,15 @@ bool resolve_api();  // returns true if fully resolved
 
 // ------ Thread-safety RAII helper --------------------------------------------
 // Attach the calling thread to the IL2CPP domain before any il2cpp_* calls.
+// Detaches only threads this scope attached itself. Existing Unity-owned
+// threads must never be detached by a short-lived inspection scope.
 struct Il2CppThreadScope {
     void* thread{ nullptr };
+    bool owns_attachment{ false };
     Il2CppThreadScope() noexcept;
     ~Il2CppThreadScope() noexcept;
     Il2CppThreadScope(const Il2CppThreadScope&) = delete;
+    Il2CppThreadScope& operator=(const Il2CppThreadScope&) = delete;
 };
 
 // ------ ClassHandle: safe wrapper around Il2CppClass* -----------------------

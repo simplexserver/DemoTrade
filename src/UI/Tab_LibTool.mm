@@ -11,6 +11,7 @@
 #include <cstring>
 #include <vector>
 #include <string>
+#include <mutex>
 
 namespace lt::ui {
 
@@ -26,6 +27,7 @@ static bool      g_hex_modified[256]{};
 static char   g_aob_pattern[128]{ "?? 48 8B ?? 00" };
 static uintptr_t g_aob_start{ 0 }, g_aob_end{ 0 };
 static std::vector<uintptr_t> g_aob_results;
+static std::mutex g_aob_results_mutex;
 static lt::scanner::AsyncScanState g_aob_state;
 static scanner::CancelFn g_aob_cancel;
 
@@ -263,13 +265,19 @@ static void draw_aob_scanner(float aw) {
     if (!running) {
         ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(10, 120, 60, 220));
         if (ImGui::Button("Start Scan", { aw * 0.6f, 28 })) {
-            g_aob_results.clear();
+            {
+                std::lock_guard<std::mutex> lock(g_aob_results_mutex);
+                g_aob_results.clear();
+            }
             g_aob_state.running.store(true);
             g_aob_state.match_count.store(0);
             g_aob_cancel = lt::scanner::aob_scan_async(
                 g_aob_pattern,
                 [](uintptr_t addr) {
-                    g_aob_results.push_back(addr);
+                    {
+                        std::lock_guard<std::mutex> lock(g_aob_results_mutex);
+                        g_aob_results.push_back(addr);
+                    }
                     g_aob_state.match_count.fetch_add(1);
                 },
                 [](size_t total) {
@@ -287,17 +295,26 @@ static void draw_aob_scanner(float aw) {
         ImGui::PopStyleColor();
     }
     ImGui::SameLine(0, 6);
-    if (ImGui::Button("Clear##aob", { aw * 0.35f, 28 })) g_aob_results.clear();
+    if (ImGui::Button("Clear##aob", { aw * 0.35f, 28 })) {
+        if (g_aob_cancel) g_aob_cancel();
+        std::lock_guard<std::mutex> lock(g_aob_results_mutex);
+        g_aob_results.clear();
+    }
 
-    ScanProgress(running ? 0.5f : (g_aob_results.empty() ? 0.0f : 1.0f),
-                 g_aob_results.size(), running);
+    std::vector<uintptr_t> results_snapshot;
+    {
+        std::lock_guard<std::mutex> lock(g_aob_results_mutex);
+        results_snapshot = g_aob_results;
+    }
+    ScanProgress(running ? 0.5f : (results_snapshot.empty() ? 0.0f : 1.0f),
+                 results_snapshot.size(), running);
 
-    if (!g_aob_results.empty()) {
+    if (!results_snapshot.empty()) {
         char hdr[64];
-        snprintf(hdr, sizeof(hdr), "%zu matches [Copy all]", g_aob_results.size());
+        snprintf(hdr, sizeof(hdr), "%zu matches [Copy all]", results_snapshot.size());
         if (ImGui::CollapsingHeader(hdr)) {
             ImGui::BeginChild("##aob_res", { 0, 180 }, true);
-            for (auto addr : g_aob_results) {
+            for (auto addr : results_snapshot) {
                 char s[20]; snprintf(s, sizeof(s), "0x%llX", (unsigned long long)addr);
                 ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(140, 220, 140, 255));
                 if (ImGui::Selectable(s)) {
@@ -313,7 +330,7 @@ static void draw_aob_scanner(float aw) {
         }
         if (ImGui::IsItemClicked(1)) {
             std::string all;
-            for (auto addr : g_aob_results) {
+            for (auto addr : results_snapshot) {
                 char s[22]; snprintf(s, sizeof(s), "0x%llX\n", (unsigned long long)addr);
                 all += s;
             }

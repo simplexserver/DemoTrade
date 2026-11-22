@@ -13,6 +13,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <atomic>
+#include <mutex>
+#include <thread>
 
 namespace lt::ui {
 
@@ -31,21 +34,98 @@ struct BreadcrumbFrame {
 };
 static std::vector<BreadcrumbFrame> g_breadcrumb;
 static lt::il2cpp::ClassHandle g_active_class{};
-static std::vector<uintptr_t>  g_found_objects;
-static bool g_objects_fetched{ false };
+static std::mutex g_objects_mutex;
+static std::vector<uintptr_t> g_found_objects;
+static std::atomic<bool> g_objects_fetched{false};
+static std::atomic<bool> g_object_scan_running{false};
 static int  g_sel_object{ 0 };
 static bool g_show_methods{ false };
 static char g_method_filter[128]{};
 
+static std::string g_active_fullname;
+static std::mutex g_class_cache_mutex;
+static std::vector<lt::il2cpp::FieldDesc> g_cached_fields;
+static std::vector<lt::il2cpp::MethodDesc> g_cached_methods;
+static std::atomic<bool> g_metadata_loading{false};
+static std::atomic<uint64_t> g_class_generation{0};
+
 // ------ Helpers --------------------------------------------------------------
+static void schedule_class_metadata(lt::il2cpp::ClassHandle klass, uint64_t generation) {
+    g_metadata_loading.store(true, std::memory_order_release);
+    std::thread([klass, generation] {
+        @autoreleasepool {
+            lt::il2cpp::Il2CppThreadScope thread_scope;
+            auto fields = klass.fields();
+            auto methods = klass.methods();
+            if (generation == g_class_generation.load(std::memory_order_acquire)) {
+                std::lock_guard<std::mutex> lock(g_class_cache_mutex);
+                g_cached_fields = std::move(fields);
+                g_cached_methods = std::move(methods);
+                g_metadata_loading.store(false, std::memory_order_release);
+            }
+        }
+    }).detach();
+}
+
+static void activate_class(lt::il2cpp::ClassHandle klass, const std::string& name) {
+    g_active_class = klass;
+    g_active_fullname = name;
+    g_sel_object = 0;
+    {
+        std::lock_guard<std::mutex> lock(g_objects_mutex);
+        g_found_objects.clear();
+    }
+    g_objects_fetched.store(false, std::memory_order_release);
+    const uint64_t generation =
+        g_class_generation.fetch_add(1, std::memory_order_acq_rel) + 1;
+    {
+        std::lock_guard<std::mutex> lock(g_class_cache_mutex);
+        g_cached_fields.clear();
+        g_cached_methods.clear();
+    }
+    schedule_class_metadata(klass, generation);
+}
+
 static void set_active_class(const std::string& name) {
-    g_breadcrumb.clear();
     auto ch = lt::il2cpp::class_from_full_name(name, true);
-    if (!ch) return;
-    g_active_class    = *ch;
-    g_found_objects.clear();
-    g_objects_fetched = false;
+    if (!ch) {
+        lt::lua::console_append("[WARN] Class not found: " + name);
+        return;
+    }
+    g_breadcrumb.clear();
+    activate_class(*ch, name);
     g_breadcrumb.push_back({ name, 0, *ch });
+}
+
+static std::vector<lt::il2cpp::FieldDesc> cached_fields_snapshot() {
+    std::lock_guard<std::mutex> lock(g_class_cache_mutex);
+    return g_cached_fields;
+}
+static std::vector<lt::il2cpp::MethodDesc> cached_methods_snapshot() {
+    std::lock_guard<std::mutex> lock(g_class_cache_mutex);
+    return g_cached_methods;
+}
+static std::vector<uintptr_t> found_objects_snapshot() {
+    std::lock_guard<std::mutex> lock(g_objects_mutex);
+    return g_found_objects;
+}
+
+static void start_object_scan(lt::il2cpp::ClassHandle klass, uint64_t generation) {
+    bool expected = false;
+    if (!g_object_scan_running.compare_exchange_strong(expected, true)) return;
+    g_objects_fetched.store(false, std::memory_order_release);
+    std::thread([klass, generation] {
+        @autoreleasepool {
+            lt::il2cpp::Il2CppThreadScope thread_scope;
+            auto objects = klass.find_objects(LT_FINDOBJ_MAX);
+            if (generation == g_class_generation.load(std::memory_order_acquire)) {
+                std::lock_guard<std::mutex> lock(g_objects_mutex);
+                g_found_objects = std::move(objects);
+                g_objects_fetched.store(true, std::memory_order_release);
+            }
+            g_object_scan_running.store(false, std::memory_order_release);
+        }
+    }).detach();
 }
 
 // ------ Render ---------------------------------------------------------------
@@ -73,9 +153,7 @@ void draw_tab_tools() noexcept {
         if (ImGui::SmallButton(g_pinned[i].name.c_str())) {
             g_pinned_sel = i;
             g_breadcrumb.clear();
-            g_active_class    = g_pinned[i].handle;
-            g_found_objects.clear();
-            g_objects_fetched = false;
+            activate_class(g_pinned[i].handle, g_pinned[i].name);
             g_breadcrumb.push_back({ g_pinned[i].name, 0, g_pinned[i].handle });
         }
         if (sel) ImGui::PopStyleColor();
@@ -94,7 +172,7 @@ void draw_tab_tools() noexcept {
     }
     ImGui::SameLine(0, 4);
     if (ImGui::Button("Pin", { 40, 0 }) && g_active_class.valid()) {
-        g_pinned.push_back({ g_active_class.full_name(), g_active_class });
+        g_pinned.push_back({ g_active_fullname, g_active_class });
         if (g_pinned.size() > 8) g_pinned.erase(g_pinned.begin());
     }
 
@@ -114,9 +192,7 @@ void draw_tab_tools() noexcept {
         if (ImGui::SmallButton(g_breadcrumb[i].label.c_str())) {
             // Navigate to this breadcrumb frame
             g_breadcrumb.resize(i + 1);
-            g_active_class    = g_breadcrumb[i].klass;
-            g_found_objects.clear();
-            g_objects_fetched = false;
+            activate_class(g_breadcrumb[i].klass, g_breadcrumb[i].label);
         }
         ImGui::PopID();
     }
@@ -125,47 +201,51 @@ void draw_tab_tools() noexcept {
         if (ImGui::SmallButton("< Back")) {
             g_breadcrumb.pop_back();
             if (!g_breadcrumb.empty()) {
-                g_active_class    = g_breadcrumb.back().klass;
-                g_found_objects.clear();
-                g_objects_fetched = false;
+                activate_class(g_breadcrumb.back().klass, g_breadcrumb.back().label);
             }
         }
     }
     ImGui::Separator();
 
     // --- Class header
-    std::string fullname = g_active_class.full_name();
+    const std::string fullname = g_active_fullname;
     GlowText(fullname, IM_COL32(140,200,255,255), IM_COL32(0,100,220,255), 2.5f);
 
     // --- Inspect Objects + Trace all
-    if (ImGui::Button("Inspect Objects", { 130, 22 })) {
-        g_found_objects   = g_active_class.find_objects(LT_FINDOBJ_MAX);
-        g_objects_fetched = true;
-        g_sel_object      = 0;
+    if (ImGui::Button("Inspect Objects", { 130, 22 }) &&
+        !g_object_scan_running.load(std::memory_order_acquire)) {
+        start_object_scan(g_active_class, g_class_generation.load(std::memory_order_acquire));
     }
     ImGui::SameLine(0, 6);
     if (ImGui::Button("Trace all", { 80, 22 })) {
-        // Hook every method with a logger trampoline (simplified: just log count)
-        lt::lua::console_append("[Trace] Would hook " + std::to_string(g_active_class.methods().size()) + " methods on " + fullname);
+        const auto methods = cached_methods_snapshot();
+        lt::lua::console_append("[Trace] " + std::to_string(methods.size()) +
+                                " methods enumerated for " + fullname);
+    }
+    if (g_object_scan_running.load(std::memory_order_acquire)) {
+        ImGui::SameLine(0, 8);
+        ImGui::TextDisabled("Scanning objects in background...");
     }
 
-    if (g_objects_fetched) {
+    const auto found_objects = found_objects_snapshot();
+    if (g_objects_fetched.load(std::memory_order_acquire)) {
         char obj_label[64];
-        snprintf(obj_label, sizeof(obj_label), "Method Filter: (none) | %zu instances",
-                 g_found_objects.size());
+        std::snprintf(obj_label, sizeof(obj_label), "%zu instances", found_objects.size());
         ImGui::TextDisabled("%s", obj_label);
-
-        // Object selector combo
-        if (!g_found_objects.empty()) {
-            static char combo_buf[64];
-            snprintf(combo_buf, sizeof(combo_buf), "0x%llX (sel #%d)",
-                     (unsigned long long)g_found_objects[g_sel_object], g_sel_object);
+        if (!found_objects.empty()) {
+            if (g_sel_object < 0 || g_sel_object >= static_cast<int>(found_objects.size()))
+                g_sel_object = 0;
+            char combo_buf[64];
+            std::snprintf(combo_buf, sizeof(combo_buf), "0x%llX (sel #%d)",
+                          static_cast<unsigned long long>(found_objects[static_cast<size_t>(g_sel_object)]),
+                          g_sel_object);
             if (ImGui::BeginCombo("##obj_sel", combo_buf)) {
-                for (size_t i = 0; i < g_found_objects.size(); ++i) {
-                    char lbl[32]; snprintf(lbl, sizeof(lbl), "#%zu 0x%llX", i,
-                                          (unsigned long long)g_found_objects[i]);
-                    bool sel = (g_sel_object == (int)i);
-                    if (ImGui::Selectable(lbl, sel)) g_sel_object = (int)i;
+                for (size_t i = 0; i < found_objects.size(); ++i) {
+                    char lbl[48];
+                    std::snprintf(lbl, sizeof(lbl), "#%zu 0x%llX", i,
+                                  static_cast<unsigned long long>(found_objects[i]));
+                    const bool sel = (g_sel_object == static_cast<int>(i));
+                    if (ImGui::Selectable(lbl, sel)) g_sel_object = static_cast<int>(i);
                     if (sel) ImGui::SetItemDefaultFocus();
                 }
                 ImGui::EndCombo();
@@ -183,11 +263,14 @@ void draw_tab_tools() noexcept {
     ImGui::BeginChild("##fields", { 0, field_h }, false,
                       ImGuiWindowFlags_HorizontalScrollbar);
     {
-        auto fields = g_active_class.fields();
-        uintptr_t obj_addr = (!g_found_objects.empty() && g_sel_object < (int)g_found_objects.size())
-            ? g_found_objects[g_sel_object] : 0;
-
-        for (auto& fd : fields) {
+        const auto fields = cached_fields_snapshot();
+        const uintptr_t obj_addr =
+            (!found_objects.empty() && g_sel_object >= 0 &&
+             g_sel_object < static_cast<int>(found_objects.size()))
+            ? found_objects[static_cast<size_t>(g_sel_object)] : 0;
+        if (g_metadata_loading.load(std::memory_order_acquire))
+            ImGui::TextDisabled("Loading class metadata...");
+        for (const auto& fd : fields) {
             ImGui::PushID(fd.name.c_str());
 
             // Type badge
@@ -271,16 +354,18 @@ void draw_tab_tools() noexcept {
         std::string path = home && *home
             ? std::string(home) + "/Documents/LibTool_dump.txt"
             : "/tmp/LibTool_dump.txt";
+        const auto fields = cached_fields_snapshot();
+        const auto methods = cached_methods_snapshot();
         std::ofstream out(path, std::ios::out | std::ios::trunc);
         if (out) {
             out << "// Dumped by SimpleXLibTool v" << LT_VERSION_STR
-                << "\n// Class: " << g_active_class.full_name() << "\n\n";
-            for (auto& fd : g_active_class.fields()) {
+                << "\n// Class: " << g_active_fullname << "\n\n";
+            for (const auto& fd : fields) {
                 out << "  [" << (fd.is_static ? "static" : "field") << "] "
                     << fd.type_name << " " << fd.name << " (offset 0x"
                     << std::hex << std::uppercase << fd.offset << std::dec << ")\n";
             }
-            for (auto& md : g_active_class.methods())
+            for (const auto& md : methods)
                 out << "  " << md.signature << "\n";
             out.close();
             lt::lua::console_append("[LibTool] Dumped to " + path);
@@ -295,10 +380,14 @@ void draw_tab_tools() noexcept {
         ImGui::PopItemWidth();
 
         ImGui::BeginChild("##methods", { 0, 0 }, false);
-        uintptr_t obj_addr = (!g_found_objects.empty() && g_sel_object < (int)g_found_objects.size())
-            ? g_found_objects[g_sel_object] : 0;
-
-        for (auto& md : g_active_class.methods()) {
+        const uintptr_t obj_addr =
+            (!found_objects.empty() && g_sel_object >= 0 &&
+             g_sel_object < static_cast<int>(found_objects.size()))
+            ? found_objects[static_cast<size_t>(g_sel_object)] : 0;
+        const auto methods = cached_methods_snapshot();
+        if (g_metadata_loading.load(std::memory_order_acquire))
+            ImGui::TextDisabled("Loading methods...");
+        for (const auto& md : methods) {
             if (g_method_filter[0] &&
                 md.name.find(g_method_filter) == std::string::npos) continue;
 

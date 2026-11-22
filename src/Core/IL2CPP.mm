@@ -103,6 +103,7 @@ static bool resolve_via_dlsym() noexcept {
     if (!g_api.domain_get) { dlclose(handle); return false; }
 
     g_api.thread_attach              = reinterpret_cast<decltype(g_api.thread_attach)>(sym("il2cpp_thread_attach"));
+    g_api.thread_current             = reinterpret_cast<decltype(g_api.thread_current)>(sym("il2cpp_thread_current"));
     g_api.thread_detach              = reinterpret_cast<decltype(g_api.thread_detach)>(sym("il2cpp_thread_detach"));
     g_api.domain_get_assemblies      = reinterpret_cast<decltype(g_api.domain_get_assemblies)>(sym("il2cpp_domain_get_assemblies"));
     g_api.assembly_get_image         = reinterpret_cast<decltype(g_api.assembly_get_image)>(sym("il2cpp_assembly_get_image"));
@@ -485,12 +486,26 @@ bool resolve_api() {
 
 // ------ Thread scope ---------------------------------------------------------
 Il2CppThreadScope::Il2CppThreadScope() noexcept {
-    if (g_api.thread_attach && g_api.domain_get) {
-        thread = g_api.thread_attach(g_api.domain_get());
+    if (!g_api.thread_attach || !g_api.domain_get) return;
+
+    // Unity's render/main thread is already attached. thread_attach() may
+    // return that existing Il2CppThread; detaching it here would unregister
+    // a thread owned by Unity and can crash the host shortly after a tab opens.
+    if (g_api.thread_current) {
+        if (g_api.thread_current()) return;
     }
+
+    Il2CppDomain* domain = g_api.domain_get();
+    if (!domain) return;
+
+    thread = g_api.thread_attach(domain);
+    // Without thread_current there is no reliable way to distinguish a newly
+    // attached worker from an existing Unity thread. Prefer a bounded leak on
+    // an uncommon worker path over detaching a Unity-owned thread.
+    owns_attachment = thread != nullptr && g_api.thread_current != nullptr;
 }
 Il2CppThreadScope::~Il2CppThreadScope() noexcept {
-    if (thread && g_api.thread_detach) {
+    if (owns_attachment && thread && g_api.thread_detach) {
         g_api.thread_detach(thread);
     }
 }
@@ -498,6 +513,7 @@ Il2CppThreadScope::~Il2CppThreadScope() noexcept {
 // ------ ClassHandle implementation -------------------------------------------
 const char* ClassHandle::name() const noexcept {
     if (!klass) return "";
+    Il2CppThreadScope scope;
     if (g_api.class_get_name) return g_api.class_get_name(klass);
     // Direct struct access fallback (v31 layout)
     auto r = lt::mem::read_ptr(reinterpret_cast<uintptr_t>(klass) + 0x18);
@@ -510,6 +526,7 @@ const char* ClassHandle::name() const noexcept {
 
 const char* ClassHandle::ns() const noexcept {
     if (!klass) return "";
+    Il2CppThreadScope scope;
     if (g_api.class_get_namespace) return g_api.class_get_namespace(klass);
     auto r = lt::mem::read_ptr(reinterpret_cast<uintptr_t>(klass) + 0x20);
     if (!r.ok()) return "";
@@ -528,6 +545,7 @@ std::string ClassHandle::full_name() const {
 
 ClassHandle ClassHandle::parent() const noexcept {
     if (!klass) return {};
+    Il2CppThreadScope scope;
     if (g_api.class_get_parent) {
         Il2CppClass* p = g_api.class_get_parent(klass);
         return { p, version };
@@ -538,6 +556,7 @@ ClassHandle ClassHandle::parent() const noexcept {
 
 bool ClassHandle::is_valuetype() const noexcept {
     if (!klass) return false;
+    Il2CppThreadScope scope;
     if (g_api.class_is_valuetype) return g_api.class_is_valuetype(klass);
     auto r = lt::mem::read<uint8_t>(reinterpret_cast<uintptr_t>(klass) + 0xE3);
     return r.ok() && r.value;
@@ -545,6 +564,7 @@ bool ClassHandle::is_valuetype() const noexcept {
 
 bool ClassHandle::is_enum() const noexcept {
     if (!klass) return false;
+    Il2CppThreadScope scope;
     if (g_api.class_is_enum) return g_api.class_is_enum(klass);
     // enumtype field at 0xE3 (v31)
     auto r = lt::mem::read<uint8_t>(reinterpret_cast<uintptr_t>(klass) + 0xE3);
@@ -553,6 +573,7 @@ bool ClassHandle::is_enum() const noexcept {
 
 uint32_t ClassHandle::instance_size() const noexcept {
     if (!klass) return 0;
+    Il2CppThreadScope scope;
     if (g_api.class_get_instance_size) return g_api.class_get_instance_size(klass);
     auto r = lt::mem::read<uint32_t>(reinterpret_cast<uintptr_t>(klass) + 0xD0);
     return r.or_default(0);
@@ -684,6 +705,7 @@ std::vector<uintptr_t> ClassHandle::find_objects(size_t limit) const {
     result.reserve(64);
     if (!klass) return result;
 
+    Il2CppThreadScope scope;
     uintptr_t target_klass = reinterpret_cast<uintptr_t>(klass);
     uint32_t  inst_size    = instance_size();
     if (inst_size < 16) inst_size = 16;
@@ -886,6 +908,7 @@ uintptr_t method_ptr(const MethodInfo* m) noexcept {
 
 std::string type_display_name(const Il2CppType* t) noexcept {
     if (!t) return "?";
+    Il2CppThreadScope scope;
     if (g_api.type_get_name) {
         const char* n = g_api.type_get_name(t);
         return n ? n : "?";

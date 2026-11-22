@@ -10,9 +10,30 @@
 #include "LibTool/Config.hpp"
 #include "imgui.h"
 #include <cstdio>
+#include <atomic>
+#include <thread>
 #include <sys/sysctl.h>
 
 namespace lt::ui {
+
+static std::atomic<bool> g_image_count_loading{false};
+static std::atomic<bool> g_image_count_ready{false};
+static std::atomic<size_t> g_image_count{0};
+
+static void refresh_image_count_async() {
+    bool expected = false;
+    if (!g_image_count_loading.compare_exchange_strong(expected, true)) return;
+
+    std::thread([] {
+        @autoreleasepool {
+            lt::il2cpp::Il2CppThreadScope thread_scope;
+            const auto images = lt::il2cpp::all_images();
+            g_image_count.store(images.size(), std::memory_order_release);
+            g_image_count_ready.store(true, std::memory_order_release);
+            g_image_count_loading.store(false, std::memory_order_release);
+        }
+    }).detach();
+}
 
 void draw_tab_settings() noexcept {
     float aw = ImGui::GetContentRegionAvail().x;
@@ -104,11 +125,21 @@ void draw_tab_settings() noexcept {
 
         ImGui::Separator();
         ImGui::Text("Images");
-        size_t img_count = lt::il2cpp::all_images().size();
-        ImGui::Text("Loaded: %zu images", img_count);
+        if (!g_image_count_ready.load(std::memory_order_acquire) &&
+            !g_image_count_loading.load(std::memory_order_acquire)) {
+            refresh_image_count_async();
+        }
+        if (g_image_count_ready.load(std::memory_order_acquire)) {
+            ImGui::Text("Loaded: %zu images",
+                        g_image_count.load(std::memory_order_acquire));
+        } else if (g_image_count_loading.load(std::memory_order_acquire)) {
+            ImGui::TextDisabled("Image list is loading...");
+        } else {
+            ImGui::TextDisabled("Image count has not been refreshed.");
+        }
         if (ImGui::Button("Refresh Images Cache", { aw - 16, 22 })) {
-            // Force IL2CPP re-resolve
-            lt::lua::console_append("[Settings] Image cache refreshed");
+            g_image_count_ready.store(false, std::memory_order_release);
+            refresh_image_count_async();
         }
 
         ImGui::Separator();

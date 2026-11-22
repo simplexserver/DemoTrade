@@ -427,15 +427,25 @@ const HookRecord* record(uint32_t hook_id) noexcept {
 
 void enumerate(std::function<bool(const HookRecord&)> visitor) {
     if (!visitor) return;
-    for (auto& rec : g_hooks) {
+
+    // Never invoke UI callbacks while holding the hook-table lock. The callback
+    // can legitimately enable/disable/remove a record.
+    std::array<HookRecord, LT_MAX_HOOKS> snapshot{};
+    {
+        std::lock_guard<std::mutex> lock(g_hook_mutex);
+        snapshot = g_hooks;
+    }
+
+    for (const auto& rec : snapshot) {
         if (rec.id == 0) continue;
         if (!visitor(rec)) break;
     }
 }
 
 uint32_t count() noexcept {
+    std::lock_guard<std::mutex> lock(g_hook_mutex);
     uint32_t n = 0;
-    for (auto& rec : g_hooks) if (rec.id > 0) ++n;
+    for (const auto& rec : g_hooks) if (rec.id > 0) ++n;
     return n;
 }
 

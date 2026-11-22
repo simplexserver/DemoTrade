@@ -1,6 +1,6 @@
 // language: Objective-C++, file: src/UI/Overlay.mm, target: iOS arm64/arm64e
 // ImGui Metal overlay system — transparent MTKView above game, iOS touch forwarding,
-// eye-logo master toggle, Deep Ocean theme, five-tab router, full custom widget library.
+// compact text master toggle, Deep Ocean theme, five-tab router, full custom widget library.
 
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
@@ -18,6 +18,9 @@ static inline ImVec4 IM_COL32_AS_VEC4(ImU32 c);
 #include <cstdio>
 #include <unordered_map>
 #include <string>
+#include <algorithm>
+#include <utility>
+#include <mutex>
 
 // ------ Forward declarations for tab renderers --------------------------------
 namespace lt::ui {
@@ -32,6 +35,20 @@ void draw_tab_libtool() noexcept;
 // and used by the pass-through overlay window to avoid swallowing game touches.
 static CGRect g_eye_toggle_bounds = CGRectZero;
 static CGRect g_main_panel_bounds = CGRectZero;
+static std::mutex g_overlay_bounds_mutex;
+
+static void set_eye_toggle_bounds(CGRect bounds) {
+    std::lock_guard<std::mutex> lock(g_overlay_bounds_mutex);
+    g_eye_toggle_bounds = bounds;
+}
+static void set_main_panel_bounds(CGRect bounds) {
+    std::lock_guard<std::mutex> lock(g_overlay_bounds_mutex);
+    g_main_panel_bounds = bounds;
+}
+static std::pair<CGRect, CGRect> get_overlay_bounds() {
+    std::lock_guard<std::mutex> lock(g_overlay_bounds_mutex);
+    return { g_eye_toggle_bounds, g_main_panel_bounds };
+}
 
 namespace lt::ui {
 
@@ -49,8 +66,12 @@ void apply_theme() noexcept {
     s.TabRounding          = 6.0f;
     s.ChildRounding        = 6.0f;
     s.PopupRounding        = 8.0f;
-    s.WindowBorderSize     = 1.0f;
+    s.WindowBorderSize     = 0.8f;
     s.FrameBorderSize      = 0.0f;
+    s.AntiAliasedLines     = true;
+    s.AntiAliasedFill      = true;
+    s.CurveTessellationTol = 1.25f;
+    s.CircleTessellationMaxError = 0.25f;
     s.WindowPadding        = { 12.0f, 10.0f };
     s.FramePadding         = { 8.0f, 4.0f };
     s.ItemSpacing          = { 8.0f, 6.0f };
@@ -495,7 +516,7 @@ static ImVec2 g_toggle_pos{ 20.0f, 100.0f };
 
 bool DrawEyeToggle() noexcept {
     bool pressed = false;
-    float sz = 56.0f;
+    float sz = 48.0f;
 
     ImGui::SetNextWindowPos(g_toggle_pos, ImGuiCond_Always);
     ImGui::SetNextWindowSize({ sz, sz }, ImGuiCond_Always);
@@ -510,7 +531,7 @@ bool DrawEyeToggle() noexcept {
     if (ImGui::Begin("##eye_toggle", nullptr, flags)) {
         ImDrawList* dl = ImGui::GetWindowDrawList();
         ImVec2 wpos = ImGui::GetWindowPos();
-        g_eye_toggle_bounds = CGRectMake(wpos.x, wpos.y, sz, sz);
+        set_eye_toggle_bounds(CGRectMake(wpos.x, wpos.y, sz, sz));
 
         // Dark rounded background
         float t = static_cast<float>(ImGui::GetTime());
@@ -522,8 +543,16 @@ bool DrawEyeToggle() noexcept {
         dl->AddRect({ wpos.x + 1, wpos.y + 1 }, { wpos.x + sz - 1, wpos.y + sz - 1 },
                     IM_COL32(0, 120, 220, brd_a), 11.0f, 0, 1.2f);
 
-        // Eyes centered in the button
-        DrawEyesLogo(dl, { wpos.x + sz * 0.5f, wpos.y + sz * 0.5f }, sz * 0.75f);
+        // Minimal text mark: keep the master toggle crisp at every display scale.
+        const char* mark = "LT";
+        const ImVec2 mark_size = ImGui::CalcTextSize(mark);
+        dl->AddText({ wpos.x + (sz - mark_size.x) * 0.5f,
+                      wpos.y + (sz - mark_size.y) * 0.5f - 1.0f },
+                    IM_COL32(225, 238, 252, 255), mark);
+        dl->AddCircleFilled({ wpos.x + sz - 9.0f, wpos.y + 9.0f },
+                            3.0f, g_state.visible
+                                ? IM_COL32(55, 220, 145, 255)
+                                : IM_COL32(105, 120, 145, 255));
 
         // Invisible button for interaction (full button area)
         ImGui::SetCursorPos({ 0, 0 });
@@ -550,7 +579,7 @@ bool DrawEyeToggle() noexcept {
 
 // ------ Main frame render ----------------------------------------------------
 void draw_frame() noexcept {
-    g_main_panel_bounds = CGRectZero;
+    set_main_panel_bounds(CGRectZero);
 
     // Eye toggle always on top
     if (DrawEyeToggle()) {
@@ -561,14 +590,17 @@ void draw_frame() noexcept {
 
     // --- Main tool window ---
     ImGuiIO& io = ImGui::GetIO();
-    float def_w = 370.0f * g_state.ui_scale;
-    float def_h = 580.0f * g_state.ui_scale;
+    const float max_w = std::max(1.0f, io.DisplaySize.x);
+    const float max_h = std::max(1.0f, io.DisplaySize.y);
+    const float def_w = std::min(370.0f * g_state.ui_scale, max_w);
+    const float def_h = std::min(580.0f * g_state.ui_scale, max_h);
+    const ImVec2 min_size = { std::min(280.0f, max_w), std::min(340.0f, max_h) };
 
     ImGui::SetNextWindowSize({ def_w, def_h }, ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowPos({ io.DisplaySize.x * 0.5f - def_w * 0.5f,
                               io.DisplaySize.y * 0.5f - def_h * 0.5f },
                             ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSizeConstraints({ 280, 400 }, { io.DisplaySize.x, io.DisplaySize.y });
+    ImGui::SetNextWindowSizeConstraints(min_size, { max_w, max_h });
 
     ImGuiWindowFlags wflags = ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
     if (g_state.fullscreen) {
@@ -584,7 +616,7 @@ void draw_frame() noexcept {
     const bool main_contents_visible = ImGui::Begin("##libtool_main", &open, wflags);
     const ImVec2 main_pos = ImGui::GetWindowPos();
     const ImVec2 main_size = ImGui::GetWindowSize();
-    g_main_panel_bounds = CGRectMake(main_pos.x, main_pos.y, main_size.x, main_size.y);
+    set_main_panel_bounds(CGRectMake(main_pos.x, main_pos.y, main_size.x, main_size.y));
     if (!main_contents_visible) {
         ImGui::End();
         ImGui::PopStyleVar();
@@ -592,7 +624,7 @@ void draw_frame() noexcept {
     }
     if (!open) {
         g_state.visible = false;
-        g_main_panel_bounds = CGRectZero;
+        set_main_panel_bounds(CGRectZero);
         ImGui::End();
         ImGui::PopStyleVar();
         return;
@@ -645,22 +677,18 @@ void draw_frame() noexcept {
 
     // --- Tab bar ---
     float aw = ImGui::GetContentRegionAvail().x;
-    static const char* tab_names[] = { "Tools", "Dumper", "Script", "Settings", "LibTool" };
-    static const ImU32 tab_active_colors[] = {
-        IM_COL32(0,120,210,255), IM_COL32(130,100,200,255),
-        IM_COL32(0,160,100,255), IM_COL32(180,130,0,255),
-        IM_COL32(200,80,30,255)
-    };
+    static const char* tab_names[] = { "TOOLS", "DUMPER", "SCRIPT", "SETTINGS", "LIBTOOL" };
+    static constexpr ImU32 tab_accent = IM_COL32(42, 164, 238, 255);
 
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, { 0.0f, 0.0f });
-    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, { 0.0f, 6.0f });
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, { 2.0f, 8.0f });
     float tab_w = aw / 5.0f;
     for (int i = 0; i < 5; ++i) {
         bool active = (g_state.active_tab == static_cast<Tab>(i));
         if (active) {
-            ImGui::PushStyleColor(ImGuiCol_Button, tab_active_colors[i]);
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, tab_active_colors[i]);
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,  tab_active_colors[i]);
+            ImGui::PushStyleColor(ImGuiCol_Button,        IM_COL32(22, 64, 92, 235));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(30, 96, 132, 245));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,  IM_COL32(25, 112, 164, 255));
         } else {
             ImGui::PushStyleColor(ImGuiCol_Button,        IM_COL32(10, 15, 35, 200));
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(20, 40, 80, 200));
@@ -676,15 +704,17 @@ void draw_frame() noexcept {
             ImVec2 p1 = ImGui::GetItemRectMax();
             ImGui::GetWindowDrawList()->AddLine(
                 { p0.x + 2, p1.y - 1.5f }, { p1.x - 2, p1.y - 1.5f },
-                tab_active_colors[i], 2.5f);
+                tab_accent, 2.5f);
         }
         if (i < 4) ImGui::SameLine(0, 0);
     }
     ImGui::PopStyleVar(2);
     ImGui::Separator();
 
-    // --- Tab content ---
-    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 2.0f);
+    // --- Scrollable tab content ---
+    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 3.0f);
+    ImGui::BeginChild("##tab_content", { 0, ImGui::GetContentRegionAvail().y },
+                      false, ImGuiWindowFlags_AlwaysVerticalScrollbar);
     switch (g_state.active_tab) {
         case Tab::Tools:    draw_tab_tools();    break;
         case Tab::Dumper:   draw_tab_dumper();   break;
@@ -692,6 +722,7 @@ void draw_frame() noexcept {
         case Tab::Settings: draw_tab_settings(); break;
         case Tab::LibTool:  draw_tab_libtool();  break;
     }
+    ImGui::EndChild();
 
     ImGui::End();
 }
@@ -813,8 +844,9 @@ void draw_frame() noexcept {
 @end
 @implementation LTOverlayWindow
 - (UIView*)hitTest:(CGPoint)point withEvent:(UIEvent*)event {
-    const BOOL in_toggle = CGRectContainsPoint(g_eye_toggle_bounds, point);
-    const BOOL in_panel = CGRectContainsPoint(g_main_panel_bounds, point);
+    const auto bounds = get_overlay_bounds();
+    const BOOL in_toggle = CGRectContainsPoint(bounds.first, point);
+    const BOOL in_panel = CGRectContainsPoint(bounds.second, point);
     if (!in_toggle && !in_panel) return nil;
     return [super hitTest:point withEvent:event];
 }
