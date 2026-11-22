@@ -14,14 +14,15 @@ LUA_URL="https://www.lua.org/ftp/${LUA_TAR}"
 LUA_SHA="9fbf5e28ef86c69858f6d3d34eccc32e911c1a28b4120ff3e84aaa70cfbf1e30"
 LUA_DST="${VENDOR_DIR}/lua54"
 
-if [[ ! -d "$LUA_DST" ]] || [[ ! -f "$LUA_DST/lua.h" ]]; then
+if [[ ! -f "$LUA_DST/lapi.c" ]] || [[ ! -f "$LUA_DST/lua.h" ]]; then
+    rm -rf "$LUA_DST"
     echo "[fetch] Downloading Lua ${LUA_VER}..."
     curl -fsSL --retry 3 -o "/tmp/${LUA_TAR}" "$LUA_URL"
     echo "[verify] Lua ${LUA_VER} SHA-256..."
     echo "${LUA_SHA}  /tmp/${LUA_TAR}" | sha256sum -c --quiet
     echo "[extract] Lua ${LUA_VER}..."
     mkdir -p "$LUA_DST"
-    tar -xzf "/tmp/${LUA_TAR}" -C "$LUA_DST" --strip-components=1
+    tar -xzf "/tmp/${LUA_TAR}" -C "$LUA_DST" --strip-components=2
     rm -f "/tmp/${LUA_TAR}"
     echo "[ok] Lua ${LUA_VER} → vendor/lua54/"
 else
