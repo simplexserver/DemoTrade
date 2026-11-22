@@ -37,11 +37,10 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential clang llvm lld ldid dpkg-dev fakeroot \
+            build-essential clang llvm lld dpkg-dev fakeroot \
             perl python3 git curl unzip xz-utils file
           make --version | head -1
           clang --version | head -1
-          ldid -h >/dev/null 2>&1 || true
 
       - name: Install Theos
         run: |
@@ -54,8 +53,11 @@ jobs:
       - name: Install iOS SDKs for cross-compilation
         run: |
           set -euo pipefail
-          git clone --depth 1 https://github.com/theos/sdks.git "$HOME/theos/sdks"
-          test -d "$HOME/theos/sdks"
+          mkdir -p "$HOME/theos/sdks"
+          if ! compgen -G "$HOME/theos/sdks/iPhoneOS*.sdk" >/dev/null; then
+            rmdir "$HOME/theos/sdks" 2>/dev/null || true
+            git clone --depth 1 https://github.com/theos/sdks.git "$HOME/theos/sdks"
+          fi
           find "$HOME/theos/sdks" -maxdepth 1 -type d -name 'iPhoneOS*.sdk' -print
           compgen -G "$HOME/theos/sdks/iPhoneOS*.sdk" >/dev/null
 
