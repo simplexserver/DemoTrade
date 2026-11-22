@@ -5,7 +5,7 @@
 #import <Foundation/Foundation.h>
 #include "LibTool/Memory.hpp"
 #include <mach-o/dyld.h>
-#include <mach/mach_vm.h>
+#include <mach/vm_map.h>
 #include <dlfcn.h>
 #include <setjmp.h>
 #include <signal.h>
@@ -94,13 +94,13 @@ MemStatus read_bytes(uintptr_t addr, void* out_buf, size_t count) noexcept {
     if (count == 0) return MemStatus::Ok;
     if (count > 64 * 1024 * 1024) return MemStatus::TooLarge;
 
-    // For large reads, use mach_vm_read_overwrite to avoid per-byte fault guards.
+    // For large reads, use vm_read_overwrite to avoid per-byte fault guards.
     if (count >= 64) {
         vm_size_t out_size = 0;
         kern_return_t kr = mach_vm_read_overwrite(
             mach_task_self(),
-            static_cast<mach_vm_address_t>(addr),
-            static_cast<mach_vm_size_t>(count),
+            static_cast<vm_address_t>(addr),
+            static_cast<vm_size_t>(count),
             reinterpret_cast<mach_vm_address_t>(out_buf),
             &out_size);
         if (kr == KERN_SUCCESS && out_size == count) return MemStatus::Ok;
@@ -341,7 +341,7 @@ std::vector<RegionInfo> enumerate_regions() noexcept {
         mach_vm_size_t size = 0;
         vm_region_submap_info_data_64_t info{};
         mach_msg_type_number_t cnt = VM_REGION_SUBMAP_INFO_COUNT_64;
-        kern_return_t kr = mach_vm_region_recurse(
+        kern_return_t kr = vm_region_recurse(
             mach_task_self(), &addr, &size, &depth,
             reinterpret_cast<vm_region_recurse_info_t>(&info), &cnt);
         if (kr != KERN_SUCCESS) break;
