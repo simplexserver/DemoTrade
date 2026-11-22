@@ -99,7 +99,10 @@ jobs:
           LLVM_NM="$(command -v llvm-nm)"
           test -n "$LLVM_LIPO"
           "$LLVM_LIPO" -info dist/LibTool.dylib
-          "$LLVM_OBJDUMP" --macho --private-headers dist/LibTool.dylib | grep -q 'MH_DYLIB'
+          FILE_INFO="$(file dist/LibTool.dylib)"
+          printf '%s\n' "$FILE_INFO"
+          grep -q 'Mach-O universal binary' <<< "$FILE_INFO"
+          grep -q 'dynamically linked shared library' <<< "$FILE_INFO"
           "$LLVM_OBJDUMP" --macho --dylibs-used dist/LibTool.dylib
           "$LLVM_NM" --extern-only --defined-only dist/LibTool.dylib | head -40
 
