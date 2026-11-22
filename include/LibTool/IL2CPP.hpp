@@ -3,6 +3,7 @@
 // IL2CPP runtime bridge. Resolves live from metadata — no offline dump.cs needed.
 
 #include "IL2CPPTypes.hpp"
+#include "Config.hpp"
 #include <optional>
 #include <string>
 #include <vector>
