@@ -31,33 +31,33 @@ struct ObjectUD {
 // ------ Helper: push value from IL2CPP field --------------------------------
 static void push_il2cpp_value(lua_State* L, uintptr_t obj_addr,
                                const lt::il2cpp::FieldDesc& fd) {
-    using lt::il2cpp::Il2CppTypeEnum;
+    using ::Il2CppTypeEnum;
     switch (fd.type_enum) {
         case Il2CppTypeEnum::IL2CPP_TYPE_BOOLEAN: {
             bool v = false;
-            lt::mem::read_bytes(obj_addr + fd.offset, &v, 1);
+            if (lt::mem::read_bytes(obj_addr + fd.offset, &v, 1) != lt::mem::MemStatus::Ok) { lua_pushnil(L); return; }
             lua_pushboolean(L, v ? 1 : 0); return;
         }
         case Il2CppTypeEnum::IL2CPP_TYPE_I4:
         case Il2CppTypeEnum::IL2CPP_TYPE_U4: {
             int32_t v = 0;
-            lt::mem::read_bytes(obj_addr + fd.offset, &v, 4);
+            if (lt::mem::read_bytes(obj_addr + fd.offset, &v, 4) != lt::mem::MemStatus::Ok) { lua_pushnil(L); return; }
             lua_pushinteger(L, v); return;
         }
         case Il2CppTypeEnum::IL2CPP_TYPE_I8:
         case Il2CppTypeEnum::IL2CPP_TYPE_U8: {
             int64_t v = 0;
-            lt::mem::read_bytes(obj_addr + fd.offset, &v, 8);
+            if (lt::mem::read_bytes(obj_addr + fd.offset, &v, 8) != lt::mem::MemStatus::Ok) { lua_pushnil(L); return; }
             lua_pushinteger(L, static_cast<lua_Integer>(v)); return;
         }
         case Il2CppTypeEnum::IL2CPP_TYPE_R4: {
             float v = 0.f;
-            lt::mem::read_bytes(obj_addr + fd.offset, &v, 4);
+            if (lt::mem::read_bytes(obj_addr + fd.offset, &v, 4) != lt::mem::MemStatus::Ok) { lua_pushnil(L); return; }
             lua_pushnumber(L, static_cast<lua_Number>(v)); return;
         }
         case Il2CppTypeEnum::IL2CPP_TYPE_R8: {
             double v = 0.0;
-            lt::mem::read_bytes(obj_addr + fd.offset, &v, 8);
+            if (lt::mem::read_bytes(obj_addr + fd.offset, &v, 8) != lt::mem::MemStatus::Ok) { lua_pushnil(L); return; }
             lua_pushnumber(L, static_cast<lua_Number>(v)); return;
         }
         case Il2CppTypeEnum::IL2CPP_TYPE_STRING: {
@@ -88,7 +88,7 @@ static void push_il2cpp_value(lua_State* L, uintptr_t obj_addr,
         default: {
             // Try as integer
             int64_t v = 0;
-            lt::mem::read_bytes(obj_addr + fd.offset, &v, sizeof(v));
+            if (lt::mem::read_bytes(obj_addr + fd.offset, &v, sizeof(v)) != lt::mem::MemStatus::Ok) { lua_pushnil(L); return; }
             lua_pushinteger(L, static_cast<lua_Integer>(v));
             return;
         }
@@ -102,13 +102,13 @@ static int obj_index(lua_State* L) {
 
     // Handle special keys first
     if (std::strcmp(key, "getClass") == 0) {
-        lua_pushcfunction(L, [](lua_State* L) -> int {
+        lua_pushcclosure(L, [](lua_State* L) -> int {
             ObjectUD* ud = static_cast<ObjectUD*>(luaL_checkudata(L, 1, OBJECT_UD_MT));
             ClassUD* cud = static_cast<ClassUD*>(lua_newuserdata(L, sizeof(ClassUD)));
             new (cud) ClassUD{ lt::il2cpp::ClassHandle{ ud->klass, lt::il2cpp::detected_version() } };
             luaL_setmetatable(L, CLASS_UD_MT);
             return 1;
-        });
+        }, 0);
         return 1;
     }
     if (std::strcmp(key, "__addr") == 0) {
@@ -151,8 +151,6 @@ static int obj_index(lua_State* L) {
             }
             lt::il2cpp::Il2CppThreadScope scope;
             Il2CppException* exc = nullptr;
-            int nargs = lua_gettop(L);
-            std::vector<void*> params;
             // Simple: pass nil for now (full param marshaling is handled per-call in HR Dev Menu via pcall)
             Il2CppObject* ret = lt::il2cpp::api().runtime_invoke(mi, obj, nullptr, &exc);
             if (exc) {
@@ -190,7 +188,7 @@ static int obj_newindex(lua_State* L) {
     lt::il2cpp::ClassHandle ch{ ud->klass, lt::il2cpp::detected_version() };
     for (auto& fd : ch.fields()) {
         if (fd.name != key) continue;
-        using lt::il2cpp::Il2CppTypeEnum;
+        using ::Il2CppTypeEnum;
         if (fd.is_static && lt::il2cpp::api().field_static_set_value && fd.info) {
             // Type-specific marshal
             if (lua_type(L, 3) == LUA_TNUMBER) {
@@ -205,22 +203,22 @@ static int obj_newindex(lua_State* L) {
             }
             return 0;
         }
-        if (!fd.is_static && ud->obj_addr && fd.offset >= 0) {
+        if (!fd.is_static && ud->obj_addr) {
             if (lua_type(L, 3) == LUA_TNUMBER) {
                 if (fd.type_enum == Il2CppTypeEnum::IL2CPP_TYPE_R4) {
                     float v = static_cast<float>(lua_tonumber(L, 3));
-                    lt::mem::write_bytes(ud->obj_addr + fd.offset, &v, 4);
+                    if (!lt::mem::write_bytes(ud->obj_addr + fd.offset, &v, 4).ok()) return luaL_error(L, "IL2CPP field write failed");
                 } else if (fd.type_enum == Il2CppTypeEnum::IL2CPP_TYPE_R8) {
                     double v = lua_tonumber(L, 3);
-                    lt::mem::write_bytes(ud->obj_addr + fd.offset, &v, 8);
+                    if (!lt::mem::write_bytes(ud->obj_addr + fd.offset, &v, 8).ok()) return luaL_error(L, "IL2CPP field write failed");
                 } else {
                     int64_t v = static_cast<int64_t>(lua_tointeger(L, 3));
-                    lt::mem::write_bytes(ud->obj_addr + fd.offset, &v,
-                                        fd.type_enum == Il2CppTypeEnum::IL2CPP_TYPE_I4 ? 4 : 8);
+                    if (!lt::mem::write_bytes(ud->obj_addr + fd.offset, &v,
+                                        fd.type_enum == Il2CppTypeEnum::IL2CPP_TYPE_I4 ? 4 : 8).ok()) return luaL_error(L, "IL2CPP field write failed");
                 }
             } else if (lua_type(L, 3) == LUA_TBOOLEAN) {
                 bool v = lua_toboolean(L, 3) != 0;
-                lt::mem::write_bytes(ud->obj_addr + fd.offset, &v, 1);
+                if (!lt::mem::write_bytes(ud->obj_addr + fd.offset, &v, 1).ok()) return luaL_error(L, "IL2CPP field write failed");
             }
         }
         return 0;
@@ -297,13 +295,13 @@ static int cls_index(lua_State* L) {
             uint8_t buf[16]{};
             lt::il2cpp::api().field_static_get_value(fd.info, buf);
             switch (fd.type_enum) {
-                case lt::il2cpp::Il2CppTypeEnum::IL2CPP_TYPE_R4: {
+                case Il2CppTypeEnum::IL2CPP_TYPE_R4: {
                     float v; memcpy(&v, buf, 4); lua_pushnumber(L, v); return 1;
                 }
-                case lt::il2cpp::Il2CppTypeEnum::IL2CPP_TYPE_R8: {
+                case Il2CppTypeEnum::IL2CPP_TYPE_R8: {
                     double v; memcpy(&v, buf, 8); lua_pushnumber(L, v); return 1;
                 }
-                case lt::il2cpp::Il2CppTypeEnum::IL2CPP_TYPE_BOOLEAN:
+                case Il2CppTypeEnum::IL2CPP_TYPE_BOOLEAN:
                     lua_pushboolean(L, buf[0]); return 1;
                 default:
                     lua_pushinteger(L, *reinterpret_cast<lua_Integer*>(buf)); return 1;
@@ -347,7 +345,7 @@ static int cls_newindex(lua_State* L) {
         if (!fd.is_static || fd.name != key || !fd.info) continue;
         if (!lt::il2cpp::api().field_static_set_value) return 0;
         if (lua_type(L, 3) == LUA_TNUMBER) {
-            if (fd.type_enum == lt::il2cpp::Il2CppTypeEnum::IL2CPP_TYPE_R4) {
+            if (fd.type_enum == Il2CppTypeEnum::IL2CPP_TYPE_R4) {
                 float v = static_cast<float>(lua_tonumber(L, 3));
                 lt::il2cpp::api().field_static_set_value(fd.info, &v);
             } else {
@@ -448,7 +446,7 @@ extern "C" int luaopen_Memory(lua_State* L) {
         { "read_float",  [](lua_State* L) -> int { auto r = lt::mem::read<float>(luaL_checkinteger(L,1));    r.ok() ? lua_pushnumber(L,r.value) : lua_pushnil(L); return 1; } },
         { "read_double", [](lua_State* L) -> int { auto r = lt::mem::read<double>(luaL_checkinteger(L,1));   r.ok() ? lua_pushnumber(L,r.value) : lua_pushnil(L); return 1; } },
         { "read_ptr",    [](lua_State* L) -> int { auto r = lt::mem::read_ptr(luaL_checkinteger(L,1));       r.ok() ? lua_pushinteger(L,static_cast<lua_Integer>(r.value)) : lua_pushnil(L); return 1; } },
-        { "read_cstr",   [](lua_State* L) -> int { auto s = lt::mem::read_cstr(luaL_checkinteger(L,1)); s ? lua_pushstring(L,s->c_str()) : lua_pushnil(L); return 1; } },
+        { "read_cstr",   [](lua_State* L) -> int { auto s = lt::mem::read_cstr(luaL_checkinteger(L,1)); if (s) lua_pushlstring(L,s->data(),s->size()); else lua_pushnil(L); return 1; } },
         { "read_ptr_chain", [](lua_State* L) -> int {
             uintptr_t base = static_cast<uintptr_t>(luaL_checkinteger(L, 1));
             luaL_checktype(L, 2, LUA_TTABLE);
