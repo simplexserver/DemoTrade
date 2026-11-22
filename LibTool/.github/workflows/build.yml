@@ -1,0 +1,127 @@
+name: SimpleXLibTool — iOS Dylib Build
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'vendor/**'
+      - 'Makefile'
+      - 'control'
+      - '.github/workflows/build.yml'
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: libtool-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Verify Xcode and iOS SDK
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          SDKPATH="$(xcrun --sdk iphoneos --show-sdk-path)"
+          echo "SDK: $SDKPATH"
+          test -d "$SDKPATH"
+          xcrun --find clang
+          xcrun --find clang++
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Install GNU Make, ldid, dpkg
+        run: |
+          set -euo pipefail
+          brew install make ldid dpkg
+          gmake --version | head -1
+
+      - name: Install Theos (pinned)
+        run: |
+          set -euo pipefail
+          git clone --recursive --depth 1 \
+            https://github.com/theos/theos.git "$HOME/theos"
+          test -f "$HOME/theos/makefiles/common.mk"
+          test -d "$HOME/theos/sdks"
+          echo "THEOS=$HOME/theos" >> "$GITHUB_ENV"
+
+      - name: Fetch and verify vendor sources
+        run: |
+          set -euo pipefail
+          bash scripts/fetch-vendor.sh
+
+      - name: Run static checks
+        run: |
+          set -euo pipefail
+          bash tests/static_checks.sh
+
+      - name: Build dylib
+        run: |
+          set -euo pipefail
+          gmake clean
+          gmake all FINALPACKAGE=1 DEBUG=0
+          DYLIB="$(find .theos -type f -name 'LibTool.dylib' -print -quit)"
+          if [[ -z "$DYLIB" ]]; then
+            echo "::error::LibTool.dylib not produced"
+            find .theos -maxdepth 8 -type f -print || true
+            exit 1
+          fi
+          mkdir -p dist
+          cp "$DYLIB" dist/LibTool.dylib
+
+      - name: Inspect Mach-O output
+        run: |
+          set -euo pipefail
+          file dist/LibTool.dylib
+          lipo -info dist/LibTool.dylib
+          otool -hv dist/LibTool.dylib | grep -qE 'MH_DYLIB|DYLIB' || \
+            { echo "::error::Not an MH_DYLIB"; exit 1; }
+          otool -L dist/LibTool.dylib
+          nm -gU dist/LibTool.dylib | head -40
+
+      - name: Verify expected slices
+        run: |
+          set -euo pipefail
+          lipo -verify_arch arm64  dist/LibTool.dylib || \
+            { echo "::error::Missing arm64 slice";  exit 1; }
+          lipo -verify_arch arm64e dist/LibTool.dylib || \
+            { echo "::error::Missing arm64e slice"; exit 1; }
+
+      - name: Verify no forbidden symbols exported
+        run: |
+          set -euo pipefail
+          # fvisibility=hidden means the only public symbol should be LTStartOverlay
+          # and the __attribute__((constructor)) entry point (which has no exported name)
+          EXPORTS=$(nm -gU dist/LibTool.dylib | grep ' T ' | grep -v LTStartOverlay || true)
+          if [[ -n "$EXPORTS" ]]; then
+            echo "Warning: unexpected exported symbols:"
+            echo "$EXPORTS"
+          fi
+
+      - name: Compute checksums
+        run: |
+          set -euo pipefail
+          shasum -a 256 dist/LibTool.dylib | tee dist/SHA256SUMS.txt
+          cat dist/SHA256SUMS.txt
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: LibTool-iOS-dylib-${{ github.sha }}
+          path: |
+            dist/LibTool.dylib
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14

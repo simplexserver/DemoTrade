@@ -1,0 +1,9 @@
+Package: com.simplexserver.libtool
+Name: SimpleXLibTool
+Version: 1.1.0
+Architecture: iphoneos-arm64
+Description: iOS Unity IL2CPP runtime inspection engine. Script tab, class tree, memory R/W, ARM64 hooking. discord.gg/Kr2pvPfEUR
+Maintainer: SimpleXServer
+Author: SimpleXServer <discord.gg/Kr2pvPfEUR>
+Section: Tweaks
+Depends: firmware (>= 14.0)
