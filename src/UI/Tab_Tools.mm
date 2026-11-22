@@ -6,6 +6,7 @@
 #include "LibTool/Hook.hpp"
 #include "LibTool/Memory.hpp"
 #include "LibTool/LuaRuntime.hpp"
+#import <dispatch/dispatch.h>
 #include "imgui.h"
 #include <vector>
 #include <string>
