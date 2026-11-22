@@ -24,6 +24,10 @@
 
 namespace lt::mem {
 
+// Il2CppString layout: object header, UTF-16 length, then character data.
+inline constexpr size_t IL2CPP_STRING_LENGTH_OFFSET = 0x10;
+inline constexpr size_t IL2CPP_STRING_CHARS_OFFSET = 0x14;
+
 // ------ Result types ----------------------------------------------------------
 enum class MemStatus : uint8_t {
     Ok,
@@ -105,6 +109,8 @@ struct ProtectGuard {
     vm_prot_t original_prot{};
     bool      valid{ false };
     ~ProtectGuard() noexcept;  // restores original_prot on scope exit
+    ProtectGuard(uintptr_t address, size_t length, vm_prot_t protection, bool is_valid) noexcept
+        : addr(address), size(length), original_prot(protection), valid(is_valid) {}
     ProtectGuard(const ProtectGuard&) = delete;
     ProtectGuard& operator=(const ProtectGuard&) = delete;
     ProtectGuard(ProtectGuard&& o) noexcept
