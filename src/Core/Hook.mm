@@ -70,7 +70,7 @@ static uintptr_t alloc_trampoline(size_t bytes, uintptr_t near_addr) {
 
     // Any page (far) — caller must use register-indirect branch
     vm_address_t addr = 0;
-    mach_vm_allocate(mach_task_self(), &addr, TRAMP_PAGE_SIZE,
+    vm_allocate(mach_task_self(), &addr, TRAMP_PAGE_SIZE,
                      VM_FLAGS_ANYWHERE);
     vm_protect(mach_task_self(), addr, TRAMP_PAGE_SIZE, FALSE,
                VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXECUTE);
@@ -151,7 +151,6 @@ uint32_t relocate_insn(uint32_t insn, uintptr_t old_pc, uintptr_t new_pc) noexce
     // --- CBZ / CBNZ (bit 25 = 0b0110 100x) ---
     // Encoding: sf:0110100x:imm19:Rt
     if ((insn & 0x7E000000u) == 0x34000000u) {
-        uint32_t Rt      = insn & 0x1Fu;
         int64_t  old_imm = static_cast<int64_t>((insn >> 5) & 0x7FFFFu) << 2;
         if (old_imm & (1LL << 20)) old_imm |= ~((1LL << 21) - 1);
         uintptr_t target  = old_pc + static_cast<uintptr_t>(old_imm);
@@ -164,7 +163,6 @@ uint32_t relocate_insn(uint32_t insn, uintptr_t old_pc, uintptr_t new_pc) noexce
     // --- TBZ / TBNZ (bit 25 = 0b0110 110x) ---
     // Encoding: b5:0110110x:b40:imm14:Rt
     if ((insn & 0x7E000000u) == 0x36000000u) {
-        uint32_t Rt      = insn & 0x1Fu;
         int64_t  old_imm = static_cast<int64_t>((insn >> 5) & 0x3FFFu) << 2;
         if (old_imm & (1LL << 15)) old_imm |= ~((1LL << 16) - 1);
         uintptr_t target  = old_pc + static_cast<uintptr_t>(old_imm);
