@@ -348,7 +348,7 @@ extern "C" int luaopen_ImGui(lua_State* L) {
     });
 
     // --- Trees
-    REG("TreeNode", [](lua_State* L)->int { lua_pushboolean(L, ImGui::TreeNode("%s", luaL_checkstring(L,1))); return 1; });
+    REG("TreeNode", [](lua_State* L)->int { lua_pushboolean(L, ImGui::TreeNode(luaL_checkstring(L,1))); return 1; });
     REG("TreePop",  [](lua_State* L)->int { ImGui::TreePop(); return 0; });
     REG("CollapsingHeader", [](lua_State* L)->int {
         lua_pushboolean(L, ImGui::CollapsingHeader(luaL_checkstring(L,1),
