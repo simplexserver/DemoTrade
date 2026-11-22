@@ -81,10 +81,19 @@ jobs:
           set -euo pipefail
           make clean
           make all FINALPACKAGE=1 DEBUG=0
-          DYLIB="$(find .theos -type f -name 'LibTool.dylib' -print -quit)"
+          LLVM_LIPO="$(command -v llvm-lipo || find /usr/bin -maxdepth 1 -name 'llvm-lipo-*' -print -quit)"
+          test -n "$LLVM_LIPO"
+          DYLIB=""
+          while IFS= read -r -d '' candidate; do
+            if "$LLVM_LIPO" -verify_arch arm64 "$candidate" >/dev/null 2>&1 && \
+               "$LLVM_LIPO" -verify_arch arm64e "$candidate" >/dev/null 2>&1; then
+              DYLIB="$candidate"
+              break
+            fi
+          done < <(find .theos -type f -name 'LibTool.dylib' -print0)
           if [[ -z "$DYLIB" ]]; then
-            echo "::error::LibTool.dylib not produced"
-            find .theos -maxdepth 8 -type f -print || true
+            echo "::error::No universal LibTool.dylib with arm64 and arm64e slices was produced"
+            find .theos -type f -name 'LibTool.dylib' -exec file {} ; || true
             exit 1
           fi
           mkdir -p dist
@@ -95,16 +104,15 @@ jobs:
           set -euo pipefail
           file dist/LibTool.dylib
           LLVM_LIPO="$(command -v llvm-lipo || find /usr/bin -maxdepth 1 -name 'llvm-lipo-*' -print -quit)"
-          LLVM_OBJDUMP="$(command -v llvm-objdump)"
           LLVM_NM="$(command -v llvm-nm)"
           test -n "$LLVM_LIPO"
+          test -n "$LLVM_NM"
           "$LLVM_LIPO" -info dist/LibTool.dylib
           FILE_INFO="$(file dist/LibTool.dylib)"
           printf '%s\n' "$FILE_INFO"
           grep -q 'Mach-O universal binary' <<< "$FILE_INFO"
           grep -q 'dynamically linked shared library' <<< "$FILE_INFO"
-          "$LLVM_OBJDUMP" --macho --dylibs-used dist/LibTool.dylib
-          "$LLVM_NM" --extern-only --defined-only dist/LibTool.dylib | head -40
+          "$LLVM_NM" --extern-only --defined-only dist/LibTool.dylib
 
       - name: Verify expected slices
         run: |
