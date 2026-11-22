@@ -32,6 +32,16 @@ jobs:
         with:
           submodules: false
 
+      - name: Apply reviewed runtime stability source updates
+        run: |
+          set -euo pipefail
+          test -s patches/runtime-stability-review.tar.gz
+          tar -xzf patches/runtime-stability-review.tar.gz -C .
+          test -s src/Hooks/EntryPoint.mm
+          test -s src/UI/Overlay.mm
+          test -s src/Core/Memory.mm
+          test -s src/Core/IL2CPP.mm
+
       - name: Install Linux build dependencies
         run: |
           set -euo pipefail
