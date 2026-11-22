@@ -36,17 +36,8 @@ static bool g_objects_fetched{ false };
 static int  g_sel_object{ 0 };
 static bool g_show_methods{ false };
 static char g_method_filter[128]{};
-static uintptr_t g_hook_target{ 0 };
 
 // ------ Helpers --------------------------------------------------------------
-static void push_breadcrumb(std::string lbl, uintptr_t addr,
-                            lt::il2cpp::ClassHandle klass) {
-    g_breadcrumb.push_back({ std::move(lbl), addr, klass });
-    g_active_class    = klass;
-    g_found_objects.clear();
-    g_objects_fetched = false;
-}
-
 static void set_active_class(const std::string& name) {
     g_breadcrumb.clear();
     auto ch = lt::il2cpp::class_from_full_name(name, true);
