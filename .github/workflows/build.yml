@@ -81,18 +81,9 @@ jobs:
           set -euo pipefail
           make clean
           make all FINALPACKAGE=1 DEBUG=0
-          LLVM_LIPO="$(command -v llvm-lipo || find /usr/bin -maxdepth 1 -name 'llvm-lipo-*' -print -quit)"
-          test -n "$LLVM_LIPO"
-          DYLIB=""
-          while IFS= read -r -d '' candidate; do
-            if "$LLVM_LIPO" -verify_arch arm64 "$candidate" >/dev/null 2>&1 && \
-               "$LLVM_LIPO" -verify_arch arm64e "$candidate" >/dev/null 2>&1; then
-              DYLIB="$candidate"
-              break
-            fi
-          done < <(find .theos -type f -name 'LibTool.dylib' -print0)
-          if [[ -z "$DYLIB" ]]; then
-            echo "::error::No universal LibTool.dylib with arm64 and arm64e slices was produced"
+          DYLIB=".theos/obj/LibTool.dylib"
+          if [[ ! -s "$DYLIB" ]]; then
+            echo "::error::Theos merged output .theos/obj/LibTool.dylib was not produced"
             find .theos -type f -name 'LibTool.dylib' -print || true
             exit 1
           fi
