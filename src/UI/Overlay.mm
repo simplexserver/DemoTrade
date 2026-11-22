@@ -487,7 +487,6 @@ void DrawEyesLogo(ImDrawList* dl, ImVec2 center, float size) noexcept {
 // ------ Floating eye toggle button ------------------------------------------
 // Small always-on-top ImGui window; click = toggle main tool, drag = reposition.
 static ImVec2 g_toggle_pos{ 20.0f, 100.0f };
-static bool   g_toggle_dragging{ false };
 
 bool DrawEyeToggle() noexcept {
     bool pressed = false;
