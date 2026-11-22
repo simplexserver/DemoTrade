@@ -300,9 +300,6 @@ static MetaVersion detect_meta_version() noexcept {
     // the class layout (instance_size field position is version-dependent).
     // Simple heuristic: check the class struct size by validating known offsets.
     // For a quick version detect, scan for the metadata header magic in memory.
-    uint32_t img_idx = find_unity_image();
-    Section text = get_section(img_idx, "__TEXT", "__text");
-
     // Scan readable data for global-metadata.dat magic: 0xFAB11BAF
     static constexpr uint32_t META_MAGIC = 0xFAB11BAFu;
     for (auto& region : lt::mem::enumerate_regions()) {
