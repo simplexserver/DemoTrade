@@ -17,6 +17,8 @@ include $(THEOS)/makefiles/common.mk
 LIBRARY_NAME := LibTool
 LibTool_USE_MODULES := 0
 
+vendor/lua54/loslib.c_CFLAGS := -DLUA_USE_IOS
+
 LibTool_FILES := \
     src/Core/Memory.mm        \
     src/Core/IL2CPP.mm        \
