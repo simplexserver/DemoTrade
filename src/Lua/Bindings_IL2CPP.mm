@@ -11,6 +11,8 @@ extern "C" {
 #include "LibTool/IL2CPP.hpp"
 #include "LibTool/LuaRuntime.hpp"
 #include "LibTool/Memory.hpp"
+#include "LibTool/Scanner.hpp"
+#include "LibTool/Hook.hpp"
 #include <cstring>
 #include <cstdio>
 #include <cmath>
@@ -485,8 +487,8 @@ extern "C" int luaopen_Memory(lua_State* L) {
         }},
         { "is_readable",   [](lua_State* L)->int { lua_pushboolean(L,lt::mem::is_readable(luaL_checkinteger(L,1))); return 1; } },
         { "is_writable",   [](lua_State* L)->int { lua_pushboolean(L,lt::mem::is_writable(luaL_checkinteger(L,1))); return 1; } },
-        { "patch_ret",     [](lua_State* L)->int { lt::mem::patch_ret(luaL_checkinteger(L,1)); lua_pushboolean(L,1); return 1; } },
-        { "patch_nop",     [](lua_State* L)->int { lt::mem::patch_nop(luaL_checkinteger(L,1),(uint32_t)luaL_optinteger(L,2,1)); lua_pushboolean(L,1); return 1; } },
+        { "patch_ret",     [](lua_State* L)->int { auto r = lt::mem::patch_ret(luaL_checkinteger(L,1)); lua_pushboolean(L,r.ok()); return 1; } },
+        { "patch_nop",     [](lua_State* L)->int { auto r = lt::mem::patch_nop(luaL_checkinteger(L,1),(uint32_t)luaL_optinteger(L,2,1)); lua_pushboolean(L,r.ok()); return 1; } },
         { nullptr, nullptr }
     };
     luaL_newlib(L, mem_lib);
@@ -520,8 +522,3 @@ extern "C" int luaopen_Hook(lua_State* L) {
     return 1;
 }
 
-// scanner namespace needs to be available for Memory.aob_scan above
-#include "LibTool/Scanner.hpp"
-namespace lt::scanner {
-    extern std::vector<uintptr_t> aob_scan(std::string_view, uintptr_t, uintptr_t) noexcept;
-}
