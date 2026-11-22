@@ -45,6 +45,7 @@ jobs:
             test -s "$RUNNER_TEMP/libtool-runtime-patch/$path"
             install -D "$RUNNER_TEMP/libtool-runtime-patch/$path" "$path"
           done
+          install -D .github/patch/Makefile Makefile
 
       - name: Install Linux build dependencies
         run: |
@@ -160,10 +161,10 @@ jobs:
         if: hashFiles('.github/patch/payload/part-*.b64') != ''
         run: |
           set -euo pipefail
-          rm -f .github/patch/payload/part-*.b64 src/.patch-ci-trigger
+          rm -f .github/patch/payload/part-*.b64 .github/patch/Makefile src/.patch-ci-trigger
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/Core/IL2CPP.mm src/Core/Memory.mm src/Hooks/EntryPoint.mm src/UI/Overlay.mm include/LibTool/Memory.hpp .github/patch/payload
+          git add src/Core/IL2CPP.mm src/Core/Memory.mm src/Hooks/EntryPoint.mm src/UI/Overlay.mm include/LibTool/Memory.hpp Makefile .github/patch/payload .github/patch/Makefile
           git add -A -- src/.patch-ci-trigger
           git commit -m "Apply reviewed overlay and runtime startup fixes"
           git push origin HEAD:main
