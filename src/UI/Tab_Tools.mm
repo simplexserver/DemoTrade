@@ -1,15 +1,17 @@
 // language: Objective-C++, file: src/UI/Tab_Tools.mm, target: iOS arm64/arm64e
 // Tools tab — live class tree, object inspector, method invoker, Patcher, Hooker.
 
-#import <Foundation/Foundation.h>
 #include "LibTool/Overlay.hpp"
 #include "LibTool/IL2CPP.hpp"
 #include "LibTool/Hook.hpp"
 #include "LibTool/Memory.hpp"
+#include "LibTool/LuaRuntime.hpp"
 #include "imgui.h"
 #include <vector>
 #include <string>
 #include <cstdio>
+#include <cstdlib>
+#include <fstream>
 
 namespace lt::ui {
 
@@ -213,27 +215,35 @@ void draw_tab_tools() noexcept {
             ImGui::SameLine(0, 6);
 
             // Live value read
-            if (obj_addr && !fd.is_static && fd.offset >= 0) {
-                using lt::il2cpp::Il2CppTypeEnum;
+            if (obj_addr && !fd.is_static) {
+                using ::Il2CppTypeEnum;
                 char val_buf[64] = "?";
                 switch (fd.type_enum) {
                     case Il2CppTypeEnum::IL2CPP_TYPE_BOOLEAN: {
-                        bool v = false; lt::mem::read_bytes(obj_addr + fd.offset, &v, 1);
-                        snprintf(val_buf, sizeof(val_buf), "%s", v ? "true" : "false"); break;
+                        bool v = false;
+                        if (lt::mem::read_bytes(obj_addr + fd.offset, &v, 1) == lt::mem::MemStatus::Ok)
+                            snprintf(val_buf, sizeof(val_buf), "%s", v ? "true" : "false");
+                        break;
                     }
                     case Il2CppTypeEnum::IL2CPP_TYPE_I4:
                     case Il2CppTypeEnum::IL2CPP_TYPE_U4: {
-                        int32_t v = 0; lt::mem::read_bytes(obj_addr + fd.offset, &v, 4);
-                        snprintf(val_buf, sizeof(val_buf), "%d", v); break;
+                        int32_t v = 0;
+                        if (lt::mem::read_bytes(obj_addr + fd.offset, &v, 4) == lt::mem::MemStatus::Ok)
+                            snprintf(val_buf, sizeof(val_buf), "%d", v);
+                        break;
                     }
                     case Il2CppTypeEnum::IL2CPP_TYPE_R4: {
-                        float v = 0; lt::mem::read_bytes(obj_addr + fd.offset, &v, 4);
-                        snprintf(val_buf, sizeof(val_buf), "%.4f", v); break;
+                        float v = 0;
+                        if (lt::mem::read_bytes(obj_addr + fd.offset, &v, 4) == lt::mem::MemStatus::Ok)
+                            snprintf(val_buf, sizeof(val_buf), "%.4f", v);
+                        break;
                     }
                     case Il2CppTypeEnum::IL2CPP_TYPE_I8:
                     case Il2CppTypeEnum::IL2CPP_TYPE_U8: {
-                        int64_t v = 0; lt::mem::read_bytes(obj_addr + fd.offset, &v, 8);
-                        snprintf(val_buf, sizeof(val_buf), "%lld", (long long)v); break;
+                        int64_t v = 0;
+                        if (lt::mem::read_bytes(obj_addr + fd.offset, &v, 8) == lt::mem::MemStatus::Ok)
+                            snprintf(val_buf, sizeof(val_buf), "%lld", (long long)v);
+                        break;
                     }
                     case Il2CppTypeEnum::IL2CPP_TYPE_STRING: {
                         auto ptr = lt::mem::read_ptr(obj_addr + fd.offset);
@@ -265,22 +275,26 @@ void draw_tab_tools() noexcept {
         g_show_methods = !g_show_methods;
     ImGui::SameLine(0, 6);
     if (ImGui::Button("Dump to file", { aw * 0.4f, 22 })) {
-        // Write class info to Documents dir
-        NSString* path = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject
-                          stringByAppendingPathComponent:@"LibTool_dump.txt"];
-        NSMutableString* out = [NSMutableString string];
-        [out appendFormat:@"// Dumped by SimpleXLibTool v%s\n// Class: %s\n\n",
-            LT_VERSION_STR, g_active_class.full_name().c_str()];
-        for (auto& fd : g_active_class.fields()) {
-            [out appendFormat:@"  [%s] %s %s (offset 0x%zX)\n",
-                fd.is_static ? "static" : "field",
-                fd.type_name.c_str(), fd.name.c_str(), fd.offset];
+        const char* home = std::getenv("HOME");
+        std::string path = home && *home
+            ? std::string(home) + "/Documents/LibTool_dump.txt"
+            : "/tmp/LibTool_dump.txt";
+        std::ofstream out(path, std::ios::out | std::ios::trunc);
+        if (out) {
+            out << "// Dumped by SimpleXLibTool v" << LT_VERSION_STR
+                << "\n// Class: " << g_active_class.full_name() << "\n\n";
+            for (auto& fd : g_active_class.fields()) {
+                out << "  [" << (fd.is_static ? "static" : "field") << "] "
+                    << fd.type_name << " " << fd.name << " (offset 0x"
+                    << std::hex << std::uppercase << fd.offset << std::dec << ")\n";
+            }
+            for (auto& md : g_active_class.methods())
+                out << "  " << md.signature << "\n";
+            out.close();
+            lt::lua::console_append("[LibTool] Dumped to " + path);
+        } else {
+            lt::lua::console_append("[LibTool] Failed to write class dump: " + path);
         }
-        for (auto& md : g_active_class.methods()) {
-            [out appendFormat:@"  %s\n", md.signature.c_str()];
-        }
-        [out writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
-        lt::lua::console_append("[LibTool] Dumped to " + std::string(path.UTF8String));
     }
 
     if (g_show_methods) {
@@ -320,8 +334,8 @@ void draw_tab_tools() noexcept {
                 if (ImGui::Button("Patcher", { 65, 20 })) {
                     uintptr_t mptr = lt::il2cpp::method_ptr(md.info);
                     if (mptr) {
-                        lt::hook::patch_ret(mptr, md.name.c_str());
-                        lt::lua::console_append("[Patch] " + md.name + " → RET patched");
+                        const uint32_t hook_id = lt::hook::patch_ret(mptr, md.name.c_str());
+                        lt::lua::console_append(hook_id ? "[Patch] " + md.name + " → RET patched" : "[Patch] " + md.name + " → patch failed");
                     }
                 }
                 ImGui::PopStyleColor();
@@ -332,8 +346,9 @@ void draw_tab_tools() noexcept {
                     uintptr_t mptr = lt::il2cpp::method_ptr(md.info);
                     if (mptr) {
                         // Log-only hook for demonstration
-                        lt::lua::console_append("[Hook] " + md.name +
-                            " at 0x" + [NSString stringWithFormat:@"%llX", (unsigned long long)mptr].UTF8String);
+                        char address[32]{};
+                        std::snprintf(address, sizeof(address), " at 0x%llX", (unsigned long long)mptr);
+                        lt::lua::console_append("[Hook] " + md.name + address);
                     }
                 }
                 ImGui::PopStyleColor();
