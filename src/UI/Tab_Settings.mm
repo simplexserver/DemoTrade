@@ -5,9 +5,12 @@
 #import <UIKit/UIKit.h>
 #include "LibTool/Overlay.hpp"
 #include "LibTool/IL2CPP.hpp"
+#include "LibTool/LuaRuntime.hpp"
+#include "LibTool/Hook.hpp"
 #include "LibTool/Config.hpp"
 #include "imgui.h"
 #include <cstdio>
+#include <sys/sysctl.h>
 
 namespace lt::ui {
 
