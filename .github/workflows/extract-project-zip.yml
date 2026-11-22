@@ -1,0 +1,96 @@
+name: Import ZIP into repository root
+
+on:
+  push:
+    paths:
+      - '*.zip'
+      - '**/*.zip'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Extract ZIP and flatten a single top-level folder
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path, PurePosixPath
+          from zipfile import ZipFile
+          import shutil
+          import stat
+
+          repo = Path.cwd()
+          archives = sorted(
+              p for p in repo.rglob("*.zip")
+              if ".git" not in p.parts and ".github" not in p.parts
+          )
+          if len(archives) != 1:
+              raise SystemExit(f"Expected exactly one ZIP in the repository, found {len(archives)}")
+
+          archive = archives[0]
+          with ZipFile(archive) as zf:
+              entries = []
+              for info in zf.infolist():
+                  raw = info.filename.replace("\\", "/")
+                  path = PurePosixPath(raw)
+                  if path.is_absolute() or not path.parts or any(part in ("", ".", "..") for part in path.parts):
+                      raise SystemExit(f"Unsafe ZIP path: {info.filename}")
+                  mode = info.external_attr >> 16
+                  if stat.S_ISLNK(mode):
+                      raise SystemExit(f"Symlinks are not allowed in ZIP: {info.filename}")
+                  entries.append((info, path))
+
+              if not entries:
+                  raise SystemExit("The ZIP is empty")
+
+              # If every entry lives inside the same single top-level directory,
+              # remove that directory level and place its contents at repository root.
+              roots = {path.parts[0] for _, path in entries}
+              flatten = (
+                  len(roots) == 1
+                  and all(len(path.parts) >= 2 for _, path in entries)
+              )
+
+              for info, path in entries:
+                  relative = Path(*path.parts[1:]) if flatten else Path(*path.parts)
+                  if not relative.parts:
+                      continue
+                  target = (repo / relative).resolve()
+                  if repo.resolve() not in target.parents and target != repo.resolve():
+                      raise SystemExit(f"ZIP path escapes repository: {info.filename}")
+                  if info.is_dir():
+                      target.mkdir(parents=True, exist_ok=True)
+                      continue
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  with zf.open(info) as source, target.open("wb") as dest:
+                      shutil.copyfileobj(source, dest)
+                  permissions = (info.external_attr >> 16) & 0o777
+                  if permissions:
+                      target.chmod(permissions)
+
+          archive.unlink()
+          print(f"Extracted {archive.name}; flattened top-level folder: {flatten}")
+          PY
+
+      - name: Commit extracted project
+        shell: bash
+        run: |
+          rm -f .github/workflows/extract-project-zip.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No repository changes to commit."
+            exit 0
+          fi
+          git commit -m "Import project from ZIP"
+          git push
