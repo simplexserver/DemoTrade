@@ -202,7 +202,7 @@ jobs:
           file dist/MobileDumper-7.dylib
           llvm-lipo -info dist/MobileDumper-7.dylib
           file dist/MobileDumper-7.dylib | grep -q 'Mach-O'
-          llvm-lipo -verify_arch arm64 dist/MobileDumper-7.dylib
+          llvm-lipo -archs dist/MobileDumper-7.dylib | grep -qw arm64
           llvm-nm --extern-only --defined-only dist/MobileDumper-7.dylib > dist/EXPORTED_SYMBOLS.txt
           sha256sum dist/MobileDumper-7.dylib | tee dist/SHA256SUMS.txt
 
