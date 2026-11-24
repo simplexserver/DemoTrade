@@ -69,7 +69,45 @@ jobs:
           test -s libs/KittyMemory/KittyMemory/MemoryPatch.cpp
           echo "Upstream revision: $(git rev-parse HEAD)"
 
-      - name: Build package with the repository's unmodified Theos Makefile
+      - name: Apply SDK and compiler compatibility fixes in the build workspace
+        working-directory: MobileDumper-7
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source = Path("Dumper/Memory/MemoryiOS.mm")
+          source_text = source.read_text()
+          replacements = {
+              "return [MainBundle.bundleIdentifier UTF8String];":
+                  "return [MainBundle.bundleIdentifier cStringUsingEncoding:NSUTF8StringEncoding];",
+              "return [[[NSProcessInfo processInfo] processName] UTF8String];":
+                  "return [[[NSProcessInfo processInfo] processName] cStringUsingEncoding:NSUTF8StringEncoding];",
+          }
+          for old, new in replacements.items():
+              count = source_text.count(old)
+              if count != 1:
+                  raise SystemExit(f"Expected exactly one occurrence of {old!r}, found {count}")
+              source_text = source_text.replace(old, new)
+          source.write_text(source_text)
+
+          makefile = Path("Theos/Makefile")
+          make_text = makefile.read_text()
+          old_flag = "-Wno-deprecated-declarations"
+          new_flag = old_flag + " -Wno-ambiguous-reversed-operator"
+          if make_text.count(old_flag) != 1:
+              raise SystemExit("Could not safely locate the Makefile warning list")
+          makefile.write_text(make_text.replace(old_flag, new_flag))
+
+          Path("BUILD_PATCHES.txt").write_text(
+              "Build-local compatibility changes; upstream repository was not modified.\\n"
+              "- Use NSString cStringUsingEncoding:NSUTF8StringEncoding for the two process-name conversions because the selected SDK omits the legacy UTF8String declaration.\\n"
+              "- Disable Clang's ambiguous-reversed-operator diagnostic for the upstream UtfN.hpp iterator implementation under C++20.\\n"
+          )
+          PY
+          git diff -- Dumper/Memory/MemoryiOS.mm Theos/Makefile
+
+      - name: Build package with Theos
         working-directory: MobileDumper-7/Theos
         run: |
           set -euo pipefail
@@ -89,6 +127,7 @@ jobs:
           cp "$DYLIB" ../dist/MobileDumper-7.dylib
           cp "$DEB" ../dist/
           git -C .. rev-parse HEAD > ../dist/UPSTREAM_COMMIT.txt
+          cp ../BUILD_PATCHES.txt ../dist/BUILD_PATCHES.txt
 
       - name: Verify dylib architecture and Mach-O type
         working-directory: MobileDumper-7
@@ -110,6 +149,7 @@ jobs:
             MobileDumper-7/dist/*.deb
             MobileDumper-7/dist/SHA256SUMS.txt
             MobileDumper-7/dist/UPSTREAM_COMMIT.txt
+            MobileDumper-7/dist/BUILD_PATCHES.txt
             MobileDumper-7/dist/EXPORTED_SYMBOLS.txt
           if-no-files-found: error
           retention-days: 14
