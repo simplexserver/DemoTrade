@@ -116,6 +116,11 @@ jobs:
 
           makefile = Path("Theos/Makefile")
           make_text = makefile.read_text()
+          target_old = "TARGET  = iphone:clang:latest:14.0"
+          target_new = "TARGET  = iphone:clang:14.5:14.0"
+          if make_text.count(target_old) != 1:
+              raise SystemExit("Could not safely locate the Theos target declaration")
+          make_text = make_text.replace(target_old, target_new)
           old_flag = "-Wno-deprecated-declarations"
           new_flag = old_flag + " -Wno-ambiguous-reversed-operator -Wno-unknown-attributes -Wno-return-std-move -Wno-range-loop-construct"
           if make_text.count(old_flag) != 1:
@@ -129,6 +134,7 @@ jobs:
               "- Disable Clang 11 unknown-attribute warnings for C++20 likely/unlikely branch hints.",
               "- Include <concepts> directly where std::same_as is used.",
               "- Keep UTF-8 generated filenames in std::string form for this libc++ filesystem implementation.",
+              "- Pin the Theos SDK to iPhoneOS 14.5 with a 14.0 deployment target for compatibility with Clang 11.",
               "- Suppress non-fatal return-move and range-loop-copy diagnostics emitted as errors by this compiler."
           ]) + chr(10))
           PY
