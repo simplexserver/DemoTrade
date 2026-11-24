@@ -1,0 +1,64 @@
+name: MobileDumper-7 iOS dylib
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/mobile-dumper.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-dumper-ios-dylib
+  cancel-in-progress: true
+
+jobs:
+  build-ios-dylib:
+    name: Build original iOS dylib
+    runs-on: macos-14
+    timeout-minutes: 90
+
+    steps:
+      - name: Install build tools
+        run: |
+          brew install cmake ninja
+          xcode-select -p
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Clone MobileDumper-7 with original submodules
+        run: |
+          git clone --recurse-submodules --depth 1 https://github.com/MJx0/MobileDumper-7.git MobileDumper-7
+          cd MobileDumper-7
+          git submodule status --recursive
+          test -f libs/KittyMemory/KittyMemory/MemoryPatch.cpp
+
+      - name: Build iOS arm64 dylib using upstream build script
+        working-directory: MobileDumper-7
+        run: |
+          chmod +x build.sh
+          ./build.sh --platform ios --target dylib --build release
+          test -s builds/ios/dylib/release/arm64/libMobileDumper-7.dylib
+
+      - name: Inspect Mach-O and generate checksum
+        working-directory: MobileDumper-7
+        run: |
+          mkdir -p dist
+          cp builds/ios/dylib/release/arm64/libMobileDumper-7.dylib dist/
+          file dist/libMobileDumper-7.dylib
+          lipo -info dist/libMobileDumper-7.dylib
+          otool -hv dist/libMobileDumper-7.dylib
+          shasum -a 256 dist/libMobileDumper-7.dylib | tee dist/SHA256SUMS.txt
+          git rev-parse HEAD > dist/UPSTREAM_COMMIT.txt
+
+      - name: Upload dylib artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MobileDumper-7-iOS-arm64-dylib-${{ github.sha }}
+          path: |
+            MobileDumper-7/dist/libMobileDumper-7.dylib
+            MobileDumper-7/dist/SHA256SUMS.txt
+            MobileDumper-7/dist/UPSTREAM_COMMIT.txt
+          if-no-files-found: error
+          retention-days: 14
