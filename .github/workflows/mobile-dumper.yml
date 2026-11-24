@@ -94,7 +94,7 @@ jobs:
           makefile = Path("Theos/Makefile")
           make_text = makefile.read_text()
           old_flag = "-Wno-deprecated-declarations"
-          new_flag = old_flag + " -Wno-ambiguous-reversed-operator"
+          new_flag = old_flag + " -Wno-ambiguous-reversed-operator -Wno-unknown-attributes"
           if make_text.count(old_flag) != 1:
               raise SystemExit("Could not safely locate the Makefile warning list")
           makefile.write_text(make_text.replace(old_flag, new_flag))
@@ -103,6 +103,7 @@ jobs:
               "Build-local compatibility changes; upstream repository was not modified.\\n"
               "- Use NSString cStringUsingEncoding:NSUTF8StringEncoding for the two process-name conversions because the selected SDK omits the legacy UTF8String declaration.\\n"
               "- Disable Clang's ambiguous-reversed-operator diagnostic for the upstream UtfN.hpp iterator implementation under C++20.\\n"
+              "- Disable Clang 11 unknown-attribute warnings for C++20 likely/unlikely branch hints.\\n"
           )
           PY
           git diff -- Dumper/Memory/MemoryiOS.mm Theos/Makefile
