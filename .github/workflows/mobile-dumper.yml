@@ -1,64 +1,109 @@
-name: MobileDumper-7 iOS dylib
+name: MobileDumper-7 — Theos iOS Dylib
 
 on:
   push:
-    branches: [main]
+    branches: [ main ]
     paths:
-      - ".github/workflows/mobile-dumper.yml"
+      - '.github/workflows/mobile-dumper.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: mobile-dumper-ios-dylib
+  group: mobile-dumper-theos-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build-ios-dylib:
-    name: Build original iOS dylib
-    runs-on: macos-14
+  build:
+    name: Build original MobileDumper-7 with Theos
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
 
     steps:
-      - name: Install build tools
+      - name: Install Linux build dependencies
         run: |
-          brew install cmake ninja
-          xcode-select -p
-          xcrun --sdk iphoneos --show-sdk-version
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential clang llvm lld dpkg-dev fakeroot \
+            perl python3 git curl unzip xz-utils file
+          make --version | head -1
 
-      - name: Clone MobileDumper-7 with original submodules
+      - name: Install Theos
         run: |
-          git clone --recurse-submodules --depth 1 https://github.com/MJx0/MobileDumper-7.git MobileDumper-7
+          set -euo pipefail
+          git clone --recursive --depth 1 https://github.com/theos/theos.git "$HOME/theos"
+          test -f "$HOME/theos/makefiles/common.mk"
+          mkdir -p "$HOME/theos/toolchain"
+          curl -fsSL --retry 3 \
+            https://github.com/L1ghtmann/llvm-project/releases/latest/download/iOSToolchain-x86_64.tar.xz \
+            | tar -xJf - -C "$HOME/theos/toolchain"
+          test -x "$HOME/theos/toolchain/linux/iphone/bin/clang"
+          "$HOME/theos/toolchain/linux/iphone/bin/clang" --version | head -1
+          echo "THEOS=$HOME/theos" >> "$GITHUB_ENV"
+
+      - name: Install iOS SDK
+        run: |
+          set -euo pipefail
+          if ! compgen -G "$HOME/theos/sdks/iPhoneOS*.sdk" >/dev/null; then
+            git clone --depth 1 https://github.com/theos/sdks.git "$HOME/theos/sdks"
+          fi
+          find "$HOME/theos/sdks" -maxdepth 1 -type d -name 'iPhoneOS*.sdk' -print
+          compgen -G "$HOME/theos/sdks/iPhoneOS*.sdk" >/dev/null
+
+      - name: Fetch the original source and submodules
+        run: |
+          set -euo pipefail
+          git clone --recursive --depth 1 https://github.com/MJx0/MobileDumper-7.git MobileDumper-7
           cd MobileDumper-7
           git submodule status --recursive
-          test -f libs/KittyMemory/KittyMemory/MemoryPatch.cpp
+          test -s Theos/Makefile
+          test -s Dumper/main_ios.mm
+          test -s libs/KittyMemory/KittyMemory/MemoryPatch.cpp
+          echo "Upstream revision: $(git rev-parse HEAD)"
 
-      - name: Build iOS arm64 dylib using upstream build script
+      - name: Build package with the repository's unmodified Theos Makefile
+        working-directory: MobileDumper-7/Theos
+        run: |
+          set -euo pipefail
+          make clean
+          make package FINALPACKAGE=1 DEBUG=0
+          DEB="$(find packages -maxdepth 1 -type f -name '*.deb' -print -quit)"
+          test -n "$DEB"
+          mkdir -p "$RUNNER_TEMP/md7-package"
+          dpkg-deb -x "$DEB" "$RUNNER_TEMP/md7-package"
+          DYLIB="$(find "$RUNNER_TEMP/md7-package" -type f -name 'MobileDumper-7.dylib' -print -quit)"
+          if [[ -z "$DYLIB" ]]; then
+            echo "::error::Theos package did not contain MobileDumper-7.dylib"
+            find "$RUNNER_TEMP/md7-package" -type f -maxdepth 8 -print
+            exit 1
+          fi
+          mkdir -p ../dist
+          cp "$DYLIB" ../dist/MobileDumper-7.dylib
+          cp "$DEB" ../dist/
+          git -C .. rev-parse HEAD > ../dist/UPSTREAM_COMMIT.txt
+
+      - name: Verify dylib architecture and Mach-O type
         working-directory: MobileDumper-7
         run: |
-          chmod +x build.sh
-          ./build.sh --platform ios --target dylib --build release
-          test -s builds/ios/dylib/release/arm64/libMobileDumper-7.dylib
+          set -euo pipefail
+          file dist/MobileDumper-7.dylib
+          llvm-lipo -info dist/MobileDumper-7.dylib
+          file dist/MobileDumper-7.dylib | grep -q 'Mach-O'
+          llvm-lipo -verify_arch arm64 dist/MobileDumper-7.dylib
+          llvm-nm --extern-only --defined-only dist/MobileDumper-7.dylib > dist/EXPORTED_SYMBOLS.txt
+          sha256sum dist/MobileDumper-7.dylib | tee dist/SHA256SUMS.txt
 
-      - name: Inspect Mach-O and generate checksum
-        working-directory: MobileDumper-7
-        run: |
-          mkdir -p dist
-          cp builds/ios/dylib/release/arm64/libMobileDumper-7.dylib dist/
-          file dist/libMobileDumper-7.dylib
-          lipo -info dist/libMobileDumper-7.dylib
-          otool -hv dist/libMobileDumper-7.dylib
-          shasum -a 256 dist/libMobileDumper-7.dylib | tee dist/SHA256SUMS.txt
-          git rev-parse HEAD > dist/UPSTREAM_COMMIT.txt
-
-      - name: Upload dylib artifact
+      - name: Upload dylib and Theos package
         uses: actions/upload-artifact@v4
         with:
-          name: MobileDumper-7-iOS-arm64-dylib-${{ github.sha }}
+          name: MobileDumper-7-Theos-iOS-arm64-${{ github.sha }}
           path: |
-            MobileDumper-7/dist/libMobileDumper-7.dylib
+            MobileDumper-7/dist/MobileDumper-7.dylib
+            MobileDumper-7/dist/*.deb
             MobileDumper-7/dist/SHA256SUMS.txt
             MobileDumper-7/dist/UPSTREAM_COMMIT.txt
+            MobileDumper-7/dist/EXPORTED_SYMBOLS.txt
           if-no-files-found: error
           retention-days: 14
