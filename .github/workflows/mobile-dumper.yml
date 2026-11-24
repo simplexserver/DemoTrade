@@ -42,15 +42,21 @@ jobs:
           test -x "$HOME/theos/toolchain/linux/iphone/bin/clang"
           "$HOME/theos/toolchain/linux/iphone/bin/clang" --version | head -1
           echo "THEOS=$HOME/theos" >> "$GITHUB_ENV"
+          echo "$HOME/theos/toolchain/linux/iphone/bin" >> "$GITHUB_PATH"
 
       - name: Install iOS SDK
         run: |
           set -euo pipefail
-          if ! compgen -G "$HOME/theos/sdks/iPhoneOS*.sdk" >/dev/null; then
-            git clone --depth 1 https://github.com/theos/sdks.git "$HOME/theos/sdks"
+          mkdir -p "$THEOS/sdks"
+          if ! compgen -G "$THEOS/sdks/iPhoneOS*.sdk" >/dev/null; then
+            SDK_SOURCE="$RUNNER_TEMP/theos-sdks"
+            rm -rf "$SDK_SOURCE"
+            git clone --depth 1 https://github.com/theos/sdks.git "$SDK_SOURCE"
+            find "$SDK_SOURCE" -mindepth 1 -maxdepth 1 -type d -name 'iPhoneOS*.sdk' \
+              -exec cp -a {} "$THEOS/sdks/" \;
           fi
-          find "$HOME/theos/sdks" -maxdepth 1 -type d -name 'iPhoneOS*.sdk' -print
-          compgen -G "$HOME/theos/sdks/iPhoneOS*.sdk" >/dev/null
+          find "$THEOS/sdks" -maxdepth 1 -type d -name 'iPhoneOS*.sdk' -print
+          compgen -G "$THEOS/sdks/iPhoneOS*.sdk" >/dev/null
 
       - name: Fetch the original source and submodules
         run: |
@@ -76,7 +82,7 @@ jobs:
           DYLIB="$(find "$RUNNER_TEMP/md7-package" -type f -name 'MobileDumper-7.dylib' -print -quit)"
           if [[ -z "$DYLIB" ]]; then
             echo "::error::Theos package did not contain MobileDumper-7.dylib"
-            find "$RUNNER_TEMP/md7-package" -type f -maxdepth 8 -print
+            find "$RUNNER_TEMP/md7-package" -maxdepth 8 -type f -print
             exit 1
           fi
           mkdir -p ../dist
