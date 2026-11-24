@@ -144,7 +144,8 @@ jobs:
           tweak_replacement = tweak_anchor + chr(10) + (
               "MobileDumper-7_USE_MODULES = 0" + chr(10) +
               "TARGET_STRIP = /bin/true" + chr(10) +
-              "TARGET_CODESIGN = /bin/true"
+              "TARGET_CODESIGN = /bin/true" + chr(10) +
+              "MobileDumper-7_LDFLAGS = -fuse-ld=lld --ld-path=$(THEOS)/toolchain/linux/iphone/bin/ld64.lld"
           )
           if make_text.count(tweak_anchor) != 1:
               raise SystemExit("Could not safely locate the tweak declaration")
@@ -166,6 +167,7 @@ jobs:
               "- Build with host Clang 18 and ld64.lld instead of the outdated bundled Clang 11 cross-toolchain.",
               "- Disable Clang modules for the Linux build and use the iPhoneOS 16.5 SDK with an iOS 14.0 deployment target.",
               "- Disable host strip and signing commands because the Ubuntu utilities cannot process Mach-O binaries.",
+              "- Set Clang --ld-path explicitly to ld64.lld so the Mach-O linker driver is selected instead of ELF ld mode.",
               "- Suppress non-fatal return-move and range-loop-copy diagnostics emitted as errors by this compiler."
           ]) + chr(10))
           PY
