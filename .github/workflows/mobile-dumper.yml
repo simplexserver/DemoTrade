@@ -91,10 +91,33 @@ jobs:
               source_text = source_text.replace(old, new)
           source.write_text(source_text)
 
+          generator_header = Path("Dumper/Generator/Generators/Generator.h")
+          header_text = generator_header.read_text()
+          include_anchor = "#include <filesystem>\\n"
+          if header_text.count(include_anchor) != 1:
+              raise SystemExit("Could not safely locate the Generator.h include section")
+          generator_header.write_text(header_text.replace(include_anchor, include_anchor + "#include <concepts>\\n"))
+
+          cpp_generator = Path("Dumper/Generator/Generators/CppGenerator.cpp")
+          cpp_text = cpp_generator.read_text()
+          cpp_replacements = {
+              "const std::u8string U8FileName = reinterpret_cast<const std::u8string&>(FileName);": "",
+              'U8FileName + u8"_classes.hpp"': 'FileName + "_classes.hpp"',
+              'U8FileName + u8"_structs.hpp"': 'FileName + "_structs.hpp"',
+              'U8FileName + u8"_parameters.hpp"': 'FileName + "_parameters.hpp"',
+              'U8FileName + u8"_functions.cpp"': 'FileName + "_functions.cpp"',
+          }
+          for old, new in cpp_replacements.items():
+              count = cpp_text.count(old)
+              if count != 1:
+                  raise SystemExit(f"Expected exactly one occurrence of {old!r}, found {count}")
+              cpp_text = cpp_text.replace(old, new)
+          cpp_generator.write_text(cpp_text)
+
           makefile = Path("Theos/Makefile")
           make_text = makefile.read_text()
           old_flag = "-Wno-deprecated-declarations"
-          new_flag = old_flag + " -Wno-ambiguous-reversed-operator -Wno-unknown-attributes"
+          new_flag = old_flag + " -Wno-ambiguous-reversed-operator -Wno-unknown-attributes -Wno-return-std-move -Wno-range-loop-construct"
           if make_text.count(old_flag) != 1:
               raise SystemExit("Could not safely locate the Makefile warning list")
           makefile.write_text(make_text.replace(old_flag, new_flag))
@@ -104,6 +127,9 @@ jobs:
               "- Use NSString cStringUsingEncoding:NSUTF8StringEncoding for the two process-name conversions because the selected SDK omits the legacy UTF8String declaration.\\n"
               "- Disable Clang's ambiguous-reversed-operator diagnostic for the upstream UtfN.hpp iterator implementation under C++20.\\n"
               "- Disable Clang 11 unknown-attribute warnings for C++20 likely/unlikely branch hints.\\n"
+              "- Include <concepts> directly where std::same_as is used.\\n"
+              "- Keep UTF-8 generated filenames in std::string form for this libc++ filesystem implementation.\\n"
+              "- Suppress non-fatal return-move and range-loop-copy diagnostics emitted as errors by this compiler.\\n"
           )
           PY
           git diff -- Dumper/Memory/MemoryiOS.mm Theos/Makefile
