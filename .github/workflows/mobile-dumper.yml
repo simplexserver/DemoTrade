@@ -26,37 +26,62 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential clang llvm lld dpkg-dev fakeroot \
+            build-essential clang-18 lld-18 llvm-18 llvm-18-tools \
+            libc++-18-dev libc++abi-18-dev dpkg-dev fakeroot \
             perl python3 git curl unzip xz-utils file
           make --version | head -1
 
-      - name: Install Theos
+      - name: Install Theos and modern Linux Mach-O toolchain
         run: |
           set -euo pipefail
           git clone --recursive --depth 1 https://github.com/theos/theos.git "$HOME/theos"
           test -f "$HOME/theos/makefiles/common.mk"
-          mkdir -p "$HOME/theos/toolchain"
-          curl -fsSL --retry 3 \
-            https://github.com/L1ghtmann/llvm-project/releases/latest/download/iOSToolchain-x86_64.tar.xz \
-            | tar -xJf - -C "$HOME/theos/toolchain"
-          test -x "$HOME/theos/toolchain/linux/iphone/bin/clang"
-          "$HOME/theos/toolchain/linux/iphone/bin/clang" --version | head -1
-          echo "THEOS=$HOME/theos" >> "$GITHUB_ENV"
-          echo "$HOME/theos/toolchain/linux/iphone/bin" >> "$GITHUB_PATH"
 
-      - name: Install iOS SDK
+          TOOLCHAIN_BIN="$HOME/theos/toolchain/linux/iphone/bin"
+          mkdir -p "$TOOLCHAIN_BIN"
+          LLVM_BIN="/usr/lib/llvm-18/bin"
+          test -x "$LLVM_BIN/clang"
+          test -x "$LLVM_BIN/clang++"
+
+          for tool in clang clang++ cc c++; do
+            ln -sf "$LLVM_BIN/$tool" "$TOOLCHAIN_BIN/$tool"
+          done
+          for tool in llvm-ar llvm-ranlib llvm-nm llvm-objdump llvm-strip llvm-lipo; do
+            if [[ -x "$LLVM_BIN/$tool" ]]; then
+              ln -sf "$LLVM_BIN/$tool" "$TOOLCHAIN_BIN/$tool"
+            fi
+          done
+
+          LD64_ARCHIVE="$RUNNER_TEMP/ld64.tar.xz"
+          curl -fsSL --retry 3 \
+            https://github.com/keith/ld64.lld/releases/download/09-15-26/ld64.tar.xz \
+            -o "$LD64_ARCHIVE"
+          echo "5e81789130ab13e31acab03d5030db6b3977c61ef5656df397f62e4d6e9a35aa  $LD64_ARCHIVE" | sha256sum -c -
+          LD64_DIR="$RUNNER_TEMP/ld64"
+          mkdir -p "$LD64_DIR"
+          tar -xJf "$LD64_ARCHIVE" -C "$LD64_DIR"
+          LD64_BIN="$(find "$LD64_DIR" -type f -name ld64.lld -print -quit)"
+          test -n "$LD64_BIN"
+          install -m 0755 "$LD64_BIN" "$TOOLCHAIN_BIN/ld64.lld"
+          ln -sf "$TOOLCHAIN_BIN/ld64.lld" "$TOOLCHAIN_BIN/ld"
+
+          test -x "$TOOLCHAIN_BIN/clang"
+          "$TOOLCHAIN_BIN/clang" --version | head -1
+          "$TOOLCHAIN_BIN/ld64.lld" --version
+          echo "THEOS=$HOME/theos" >> "$GITHUB_ENV"
+          echo "$TOOLCHAIN_BIN" >> "$GITHUB_PATH"
+
+      - name: Install iPhoneOS 16.5 SDK
         run: |
           set -euo pipefail
           mkdir -p "$THEOS/sdks"
-          if ! compgen -G "$THEOS/sdks/iPhoneOS*.sdk" >/dev/null; then
-            SDK_SOURCE="$RUNNER_TEMP/theos-sdks"
-            rm -rf "$SDK_SOURCE"
-            git clone --depth 1 https://github.com/theos/sdks.git "$SDK_SOURCE"
-            find "$SDK_SOURCE" -mindepth 1 -maxdepth 1 -type d -name 'iPhoneOS*.sdk' \
-              -exec cp -a {} "$THEOS/sdks/" \;
-          fi
-          find "$THEOS/sdks" -maxdepth 1 -type d -name 'iPhoneOS*.sdk' -print
-          compgen -G "$THEOS/sdks/iPhoneOS*.sdk" >/dev/null
+          SDK_SOURCE="$RUNNER_TEMP/theos-sdks"
+          rm -rf "$SDK_SOURCE"
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/theos/sdks.git "$SDK_SOURCE"
+          git -C "$SDK_SOURCE" sparse-checkout set iPhoneOS16.5.sdk
+          test -d "$SDK_SOURCE/iPhoneOS16.5.sdk"
+          ln -s "$SDK_SOURCE/iPhoneOS16.5.sdk" "$THEOS/sdks/iPhoneOS16.5.sdk"
+          ls -ld "$THEOS/sdks/iPhoneOS16.5.sdk"
 
       - name: Fetch the original source and submodules
         run: |
@@ -117,12 +142,23 @@ jobs:
           makefile = Path("Theos/Makefile")
           make_text = makefile.read_text()
           target_old = "TARGET  = iphone:clang:latest:14.0"
-          target_new = "TARGET  = iphone:clang:14.5:14.0"
+          target_new = "TARGET  = iphone:clang:16.5:14.0"
           if make_text.count(target_old) != 1:
               raise SystemExit("Could not safely locate the Theos target declaration")
           make_text = make_text.replace(target_old, target_new)
+
+          tweak_anchor = "TWEAK_NAME = MobileDumper-7"
+          tweak_replacement = tweak_anchor + chr(10) + (
+              "MobileDumper-7_USE_MODULES = 0" + chr(10) +
+              "TARGET_STRIP = /bin/true" + chr(10) +
+              "TARGET_CODESIGN = /bin/true"
+          )
+          if make_text.count(tweak_anchor) != 1:
+              raise SystemExit("Could not safely locate the tweak declaration")
+          make_text = make_text.replace(tweak_anchor, tweak_replacement)
+
           old_flag = "-Wno-deprecated-declarations"
-          new_flag = old_flag + " -Wno-ambiguous-reversed-operator -Wno-unknown-attributes -Wno-return-std-move -Wno-range-loop-construct"
+          new_flag = old_flag + " -Wno-ambiguous-reversed-operator -Wno-unknown-attributes -Wno-return-std-move -Wno-range-loop-construct -fno-modules -g0"
           if make_text.count(old_flag) != 1:
               raise SystemExit("Could not safely locate the Makefile warning list")
           makefile.write_text(make_text.replace(old_flag, new_flag))
@@ -134,7 +170,9 @@ jobs:
               "- Disable Clang 11 unknown-attribute warnings for C++20 likely/unlikely branch hints.",
               "- Include <concepts> directly where std::same_as is used.",
               "- Keep UTF-8 generated filenames in std::string form for this libc++ filesystem implementation.",
-              "- Pin the Theos SDK to iPhoneOS 14.5 with a 14.0 deployment target for compatibility with Clang 11.",
+              "- Build with host Clang 18 and ld64.lld instead of the outdated bundled Clang 11 cross-toolchain.",
+              "- Disable Clang modules for the Linux build and use the iPhoneOS 16.5 SDK with an iOS 14.0 deployment target.",
+              "- Disable host strip and signing commands because the Ubuntu utilities cannot process Mach-O binaries.",
               "- Suppress non-fatal return-move and range-loop-copy diagnostics emitted as errors by this compiler."
           ]) + chr(10))
           PY
