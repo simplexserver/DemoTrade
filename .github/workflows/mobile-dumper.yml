@@ -52,17 +52,10 @@ jobs:
             fi
           done
 
-          LD64_ARCHIVE="$RUNNER_TEMP/ld64.tar.xz"
-          curl -fsSL --retry 3 \
-            https://github.com/keith/ld64.lld/releases/download/09-15-26/ld64.tar.xz \
-            -o "$LD64_ARCHIVE"
-          echo "5e81789130ab13e31acab03d5030db6b3977c61ef5656df397f62e4d6e9a35aa  $LD64_ARCHIVE" | sha256sum -c -
-          LD64_DIR="$RUNNER_TEMP/ld64"
-          mkdir -p "$LD64_DIR"
-          tar -xJf "$LD64_ARCHIVE" -C "$LD64_DIR"
-          LD64_BIN="$(find "$LD64_DIR" -type f -name ld64.lld -print -quit)"
-          test -n "$LD64_BIN"
-          install -m 0755 "$LD64_BIN" "$TOOLCHAIN_BIN/ld64.lld"
+          LD64_BIN="$LLVM_BIN/ld64.lld"
+          test -x "$LD64_BIN"
+          "$LD64_BIN" --version
+          ln -sf "$LD64_BIN" "$TOOLCHAIN_BIN/ld64.lld"
           ln -sf "$TOOLCHAIN_BIN/ld64.lld" "$TOOLCHAIN_BIN/ld"
 
           test -x "$TOOLCHAIN_BIN/clang"
