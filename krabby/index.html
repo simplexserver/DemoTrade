@@ -4,13 +4,17 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#090d13">
-  <meta name="description" content="SimpleXEngine [BOT] — Deriv trading terminal. Machine learning, 14 engines, 30+ markets. Demo mode default. Real money locked. No profit guaranteed.">
+  <meta name="description" content="SimpleXEngine [BOT] — Deriv trading terminal. 14 engines, 30+ markets. Live prices.">
   <title>Krabby · SimpleXEngine [BOT]</title>
   <link rel="icon" href="assets/krabby-logo.jpg" type="image/jpeg">
   <link rel="apple-touch-icon" href="assets/krabby-logo.jpg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
   <link rel="stylesheet" href="css/app.css">
+  <!-- Lightweight Charts must load BEFORE the ES module -->
+  <script src="vendor/lightweight-charts.standalone.production.js"></script>
+  <!-- Lucide icons -->
+  <script src="https://unpkg.com/lucide@0.263.1/dist/umd/lucide.min.js"></script>
 </head>
 <body>
 
@@ -36,8 +40,8 @@
 <div id="consent-banner" class="hidden">
   <p>
     <strong>SimpleXEngine stores nothing by default.</strong>
-    Accept cookies to save your settings, candle history and trade log on this device.
-    You can withdraw consent at any time under Settings → Data.
+    Accept to save your settings and trade log on this device.
+    Withdraw any time under Settings → Data.
   </p>
   <div class="consent-btns">
     <button id="consent-decline" class="btn btn-secondary btn-sm">Decline</button>
@@ -48,7 +52,9 @@
 <!-- ══ Top bar ══════════════════════════════════════════════════════════════ -->
 <header class="topbar">
   <div class="brand">
-    <button class="icon-btn mobile-menu-btn" id="mobile-menu-btn" aria-label="Menu">☰</button>
+    <button class="icon-btn mobile-menu-btn" id="mobile-menu-btn" aria-label="Menu">
+      <i data-lucide="menu"></i>
+    </button>
     <img class="brand-logo" src="assets/krabby-logo.jpg" alt="Krabby">
     <span class="brand-name">SimpleXEngine</span>
     <span class="brand-tag">[BOT]</span>
@@ -63,9 +69,11 @@
     </div>
     <div class="run-indicator" id="run-indicator">
       <span class="run-dot"></span>
-      Stopped
+      <span id="run-label">Stopped</span>
     </div>
-    <button class="icon-btn" title="Settings" onclick="app.navigate('settings')">⚙</button>
+    <button class="icon-btn" id="btn-topbar-settings" title="Settings" aria-label="Settings">
+      <i data-lucide="settings"></i>
+    </button>
   </div>
 </header>
 
@@ -75,37 +83,53 @@
   <!-- ── Sidebar ───────────────────────────────────────────────────────── -->
   <nav class="sidebar">
     <div class="mode-bar" id="mode-bar">
-      <span style="font-size:.85rem">📄</span>
-      <span style="font-size:.72rem;color:var(--muted2)">Paper mode — demo safe</span>
+      <i data-lucide="file-text" class="mode-bar-icon"></i>
+      <span id="mode-bar-label" style="font-size:.72rem;color:var(--muted2)">Paper mode</span>
     </div>
 
     <div class="sidebar-section">Trading</div>
-    <div class="nav-item" data-view="dashboard"><span class="nav-icon">📊</span>Dashboard</div>
+    <div class="nav-item" data-view="dashboard">
+      <i data-lucide="layout-dashboard" class="nav-icon"></i>Dashboard
+    </div>
     <div class="nav-item" data-view="trading">
-      <span class="nav-icon">⚡</span>Trading
+      <i data-lucide="zap" class="nav-icon"></i>Trading
       <span class="nav-badge" id="positions-badge" style="display:none">0</span>
     </div>
-    <div class="nav-item" data-view="markets"><span class="nav-icon">🌐</span>Markets</div>
-    <div class="nav-item" data-view="chart"><span class="nav-icon">📈</span>Chart</div>
+    <div class="nav-item" data-view="markets">
+      <i data-lucide="globe" class="nav-icon"></i>Markets
+    </div>
+    <div class="nav-item" data-view="chart">
+      <i data-lucide="trending-up" class="nav-icon"></i>Chart
+    </div>
 
     <div class="sidebar-section">Intelligence</div>
-    <div class="nav-item" data-view="engines"><span class="nav-icon">🧠</span>Engines</div>
-    <div class="nav-item" data-view="lab"><span class="nav-icon">🔬</span>Lab &amp; Backtest</div>
+    <div class="nav-item" data-view="engines">
+      <i data-lucide="cpu" class="nav-icon"></i>Engines
+    </div>
+    <div class="nav-item" data-view="lab">
+      <i data-lucide="flask-conical" class="nav-icon"></i>Lab &amp; Backtest
+    </div>
     <div class="nav-item" data-view="learning">
-      <span class="nav-icon">🤖</span>Learning
+      <i data-lucide="bot" class="nav-icon"></i>Learning
       <span class="nav-badge warn" id="proposals-badge" style="display:none">0</span>
     </div>
 
     <div class="sidebar-section">System</div>
-    <div class="nav-item" data-view="broker"><span class="nav-icon">🔗</span>Broker</div>
-    <div class="nav-item" data-view="settings"><span class="nav-icon">⚙</span>Settings</div>
-    <div class="nav-item" data-view="about"><span class="nav-icon">ℹ</span>About &amp; Risk</div>
+    <div class="nav-item" data-view="broker">
+      <i data-lucide="plug" class="nav-icon"></i>Broker
+    </div>
+    <div class="nav-item" data-view="settings">
+      <i data-lucide="settings-2" class="nav-icon"></i>Settings
+    </div>
+    <div class="nav-item" data-view="about">
+      <i data-lucide="info" class="nav-icon"></i>About
+    </div>
 
     <div class="sidebar-footer">
       <div class="balance-display">
         <div class="balance-label">Usable Balance</div>
         <div class="balance-amount" id="sidebar-balance">$5.00</div>
-        <div class="balance-subtext">$5 cap · paper mode</div>
+        <div class="balance-subtext" id="sidebar-balance-sub">$5 cap · paper mode</div>
       </div>
     </div>
   </nav>
@@ -116,7 +140,9 @@
     <!-- ═══ DASHBOARD ═════════════════════════════════════════════════════ -->
     <div class="view" id="view-dashboard">
       <div>
-        <div class="view-title"><span class="view-icon">📊</span> Dashboard</div>
+        <div class="view-title">
+          <i data-lucide="layout-dashboard" class="view-icon-lucide"></i> Dashboard
+        </div>
         <div class="view-subtitle">SimpleXEngine [BOT] — live paper-trading session</div>
       </div>
 
@@ -145,7 +171,7 @@
         <div class="stat-card" style="--accent-color:#8b5cf6">
           <div class="stat-label">Open Positions</div>
           <div class="stat-value" id="stat-positions">0</div>
-          <div class="stat-delta" id="stat-mode">paper mode</div>
+          <div class="stat-delta" id="stat-pos-delta">paper mode</div>
         </div>
         <div class="stat-card" style="--accent-color:#ef4444">
           <div class="stat-label">Mode</div>
@@ -164,21 +190,27 @@
       <div class="panel" style="padding:16px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
         <div>
           <div style="font-size:.85rem;font-weight:600;color:var(--text)">Bot Control</div>
-          <div style="font-size:.72rem;color:var(--muted);margin-top:2px">Paper trading — no real money at risk</div>
+          <div style="font-size:.72rem;color:var(--muted);margin-top:2px" id="bot-mode-label">Paper mode — no real money at risk</div>
         </div>
         <div style="display:flex;gap:8px;margin-left:auto;flex-wrap:wrap">
-          <button class="btn btn-primary btn-sm" id="btn-run" onclick="app.toggleBot()">▶ Start Bot</button>
-          <button class="btn btn-secondary btn-sm" onclick="app.navigate('settings')">⚙ Settings</button>
-          <button class="btn btn-secondary btn-sm" onclick="app.navigate('lab')">🔬 Backtest</button>
+          <button class="btn btn-primary btn-sm" id="btn-run">
+            <i data-lucide="play"></i> Start Bot
+          </button>
+          <button class="btn btn-secondary btn-sm" id="btn-dash-settings">
+            <i data-lucide="settings-2"></i> Settings
+          </button>
+          <button class="btn btn-secondary btn-sm" id="btn-dash-lab">
+            <i data-lucide="flask-conical"></i> Lab
+          </button>
         </div>
       </div>
 
       <!-- Recent trades -->
       <div class="panel">
         <div class="panel-header">
-          <span class="panel-title">Recent Trades (Paper)</span>
+          <span class="panel-title">Recent Trades</span>
           <div class="panel-actions">
-            <span class="badge badge-muted">Session</span>
+            <span class="badge badge-muted" id="trade-mode-badge">Paper</span>
           </div>
         </div>
         <div class="panel-body scroll-y" style="max-height:280px">
@@ -195,22 +227,27 @@
     <!-- ═══ TRADING ════════════════════════════════════════════════════════ -->
     <div class="view" id="view-trading">
       <div>
-        <div class="view-title"><span class="view-icon">⚡</span> Trading</div>
-        <div class="view-subtitle">Open positions and pending orders — paper mode</div>
+        <div class="view-title">
+          <i data-lucide="zap" class="view-icon-lucide"></i> Trading
+        </div>
+        <div class="view-subtitle">Open positions and pending orders</div>
       </div>
       <div class="panel">
         <div class="panel-header"><span class="panel-title">Open Positions</span></div>
         <div class="panel-body">
           <div class="empty-state">
-            <div class="empty-icon">⚡</div>
-            No open positions. Start the bot or place a manual order.
+            <div class="empty-icon-svg"><i data-lucide="zap"></i></div>
+            No open positions. Start the bot or connect Deriv.
           </div>
         </div>
       </div>
       <div class="panel">
         <div class="panel-header"><span class="panel-title">Pending Orders</span></div>
         <div class="panel-body">
-          <div class="empty-state"><div class="empty-icon">🕐</div>No pending orders.</div>
+          <div class="empty-state">
+            <div class="empty-icon-svg"><i data-lucide="clock"></i></div>
+            No pending orders.
+          </div>
         </div>
       </div>
     </div>
@@ -218,8 +255,10 @@
     <!-- ═══ MARKETS ════════════════════════════════════════════════════════ -->
     <div class="view" id="view-markets">
       <div>
-        <div class="view-title"><span class="view-icon">🌐</span> Markets</div>
-        <div class="view-subtitle">30+ live-price markets — simulated ticks · connect Deriv for real prices</div>
+        <div class="view-title">
+          <i data-lucide="globe" class="view-icon-lucide"></i> Markets
+        </div>
+        <div class="view-subtitle" id="markets-subtitle">30+ markets — connecting to Deriv live prices…</div>
       </div>
       <div id="markets-container"></div>
     </div>
@@ -227,10 +266,12 @@
     <!-- ═══ CHART ═══════════════════════════════════════════════════════════ -->
     <div class="view" id="view-chart">
       <div>
-        <div class="view-title"><span class="view-icon">📈</span> Chart</div>
-        <div class="view-subtitle">Candlestick chart powered by Lightweight Charts™</div>
+        <div class="view-title">
+          <i data-lucide="trending-up" class="view-icon-lucide"></i> Chart
+        </div>
+        <div class="view-subtitle">Candlestick chart — Lightweight Charts™ · real Deriv prices</div>
       </div>
-      <div class="chart-panel" style="min-height:420px">
+      <div class="chart-panel" style="min-height:460px">
         <div class="chart-toolbar">
           <span class="chart-title" id="chart-asset-label">R_100 — Volatility 100 Index</span>
           <div class="tf-tabs">
@@ -239,9 +280,20 @@
             <button class="tf-tab" data-tf="900">15m</button>
             <button class="tf-tab" data-tf="3600">1H</button>
             <button class="tf-tab" data-tf="14400">4H</button>
+            <button class="tf-tab" data-tf="86400">1D</button>
           </div>
           <div style="display:flex;gap:6px;margin-left:auto">
-            <button class="btn btn-secondary btn-xs" id="chart-load-history">Load history</button>
+            <select class="form-select" id="chart-symbol-select" style="width:160px;font-size:.75rem;padding:4px 8px">
+              <option value="R_100">R_100 — Vol 100</option>
+              <option value="R_50">R_50 — Vol 50</option>
+              <option value="R_75">R_75 — Vol 75</option>
+              <option value="frxXAUUSD">XAU/USD — Gold</option>
+              <option value="cryBTCUSD">BTC/USD — Bitcoin</option>
+              <option value="frxEURUSD">EUR/USD</option>
+            </select>
+            <button class="btn btn-secondary btn-xs" id="chart-load-history">
+              <i data-lucide="refresh-cw"></i> Refresh
+            </button>
           </div>
         </div>
         <div class="chart-area">
@@ -253,7 +305,9 @@
     <!-- ═══ ENGINES ════════════════════════════════════════════════════════ -->
     <div class="view" id="view-engines">
       <div>
-        <div class="view-title"><span class="view-icon">🧠</span> Engines</div>
+        <div class="view-title">
+          <i data-lucide="cpu" class="view-icon-lucide"></i> Engines
+        </div>
         <div class="view-subtitle">14-engine analysis pipeline — processing every bar in real time</div>
       </div>
 
@@ -271,20 +325,24 @@
     <!-- ═══ LAB & BACKTEST ═════════════════════════════════════════════════ -->
     <div class="view" id="view-lab">
       <div>
-        <div class="view-title"><span class="view-icon">🔬</span> Lab &amp; Backtest</div>
-        <div class="view-subtitle">Strategy editor, backtester, scanner and rule book</div>
+        <div class="view-title">
+          <i data-lucide="flask-conical" class="view-icon-lucide"></i> Lab &amp; Backtest
+        </div>
+        <div class="view-subtitle">Strategy editor, backtester, 100-trade tester, scanner and rule book</div>
       </div>
 
       <div class="tabs">
         <button class="tab active" data-tab="backtest">Backtest</button>
+        <button class="tab" data-tab="tradetest">100-Trade Test</button>
         <button class="tab" data-tab="scanner">Scanner</button>
         <button class="tab" data-tab="editor">Strategy Editor</button>
         <button class="tab" data-tab="rulebook">Rule Book</button>
       </div>
 
+      <!-- BACKTEST TAB -->
       <div id="lab-tab-backtest">
         <div class="panel" style="padding:18px">
-          <div style="font-size:.88rem;font-weight:600;color:var(--text);margin-bottom:14px">Run a Backtest</div>
+          <div style="font-size:.88rem;font-weight:600;color:var(--text);margin-bottom:14px">Monte Carlo Backtest</div>
           <div class="form-grid" style="gap:14px;margin-bottom:14px">
             <div class="form-row">
               <label class="form-label">Asset</label>
@@ -318,8 +376,12 @@
             </div>
           </div>
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <button class="btn btn-primary" id="btn-backtest">▶ Run Backtest</button>
-            <button class="btn btn-secondary" id="btn-cancel-bt" style="display:none">✕ Cancel</button>
+            <button class="btn btn-primary" id="btn-backtest">
+              <i data-lucide="play"></i> Run Backtest
+            </button>
+            <button class="btn btn-secondary" id="btn-cancel-bt" style="display:none">
+              <i data-lucide="x"></i> Cancel
+            </button>
             <div class="scanner-status" id="bt-status"></div>
           </div>
           <div class="progress-bar" id="bt-progress-bar" style="display:none"><div class="progress-fill" id="bt-progress-fill" style="width:0%"></div></div>
@@ -327,30 +389,111 @@
         </div>
       </div>
 
+      <!-- 100-TRADE TEST TAB -->
+      <div id="lab-tab-tradetest" style="display:none">
+        <div class="panel" style="padding:18px">
+          <div style="font-size:.88rem;font-weight:600;color:var(--text);margin-bottom:6px">100-Trade Configuration Test</div>
+          <div style="font-size:.78rem;color:var(--muted);margin-bottom:16px;line-height:1.6">
+            Run 100+ simulated paper trades with your current settings to measure win rate, profit factor and drawdown.
+            Use this to tune settings before trading live. Results are for paper only — real markets will differ.
+          </div>
+          <div class="form-grid" style="gap:14px;margin-bottom:16px">
+            <div class="form-row">
+              <label class="form-label">Asset</label>
+              <select class="form-select" id="tt-asset">
+                <option value="R_100">R_100 — Volatility 100</option>
+                <option value="R_50">R_50 — Volatility 50</option>
+                <option value="R_75">R_75 — Volatility 75</option>
+                <option value="frxXAUUSD">XAU/USD — Gold</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <label class="form-label">Number of trades</label>
+              <input class="form-input" id="tt-count" type="number" value="100" min="50" max="2000" step="50">
+            </div>
+            <div class="form-row">
+              <label class="form-label">Risk per trade (%)</label>
+              <input class="form-input" id="tt-risk" type="number" value="1" min="0.1" max="2" step="0.1">
+            </div>
+            <div class="form-row">
+              <label class="form-label">Strategy</label>
+              <select class="form-select" id="tt-strategy">
+                <option value="all_engines">All 14 engines (default)</option>
+                <option value="ble_only">BLE only</option>
+                <option value="trend_only">Trend-following only</option>
+                <option value="reversal_only">Reversal only</option>
+              </select>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+            <button class="btn btn-primary" id="btn-tradetest">
+              <i data-lucide="play"></i> Run Trade Test
+            </button>
+            <button class="btn btn-secondary" id="btn-cancel-tt" style="display:none">
+              <i data-lucide="x"></i> Cancel
+            </button>
+            <div class="scanner-status" id="tt-status"></div>
+          </div>
+          <div class="progress-bar" id="tt-progress-bar" style="display:none"><div class="progress-fill" id="tt-progress-fill" style="width:0%"></div></div>
+          <div id="tt-result" style="margin-top:14px"></div>
+        </div>
+
+        <!-- Settings tuner -->
+        <div class="panel" style="padding:18px;margin-top:0">
+          <div style="font-size:.88rem;font-weight:600;color:var(--text);margin-bottom:10px">Settings Quick-Tune</div>
+          <div style="font-size:.75rem;color:var(--muted);margin-bottom:14px">Adjust settings and re-run to compare win rates.</div>
+          <div class="form-grid" style="gap:12px">
+            <div class="form-row">
+              <label class="form-label">Min engine agreement (engines)</label>
+              <input class="form-input" id="tune-min-agree" type="number" value="3" min="1" max="14">
+            </div>
+            <div class="form-row">
+              <label class="form-label">Min signal strength (0–1)</label>
+              <input class="form-input" id="tune-min-strength" type="number" value="0.6" min="0" max="1" step="0.05">
+            </div>
+            <div class="form-row">
+              <label class="form-label">Profit target (R multiple)</label>
+              <input class="form-input" id="tune-profit-r" type="number" value="2" min="0.5" max="10" step="0.5">
+            </div>
+            <div class="form-row">
+              <label class="form-label">Stop loss (R multiple)</label>
+              <input class="form-input" id="tune-stop-r" type="number" value="1" min="0.5" max="5" step="0.25">
+            </div>
+          </div>
+          <div style="margin-top:12px">
+            <button class="btn btn-secondary btn-sm" id="btn-apply-tune">
+              <i data-lucide="check"></i> Apply &amp; Re-run
+            </button>
+          </div>
+          <div id="tt-compare" style="margin-top:12px;font-size:.78rem;color:var(--muted)"></div>
+        </div>
+      </div>
+
+      <!-- SCANNER TAB -->
       <div id="lab-tab-scanner" style="display:none">
         <div class="panel" style="padding:18px">
           <div style="font-size:.88rem;font-weight:600;color:var(--text);margin-bottom:8px">Condition Scanner</div>
           <div style="font-size:.78rem;color:var(--muted);margin-bottom:14px">
-            Tests thousands of engine-output conditions against the trade history.
-            Uses Benjamini–Hochberg FDR control. Finding a rule here is rare and not a guarantee.
+            Tests engine-output conditions against the trade history using Benjamini–Hochberg FDR control.
           </div>
-          <button class="btn btn-primary btn-sm" id="btn-scan">▶ Start Scan</button>
+          <button class="btn btn-primary btn-sm" id="btn-scan">
+            <i data-lucide="scan-search"></i> Start Scan
+          </button>
           <div id="scan-result" style="margin-top:14px"></div>
         </div>
       </div>
 
+      <!-- STRATEGY EDITOR TAB -->
       <div id="lab-tab-editor" style="display:none">
         <div class="panel" style="padding:18px">
           <div style="font-size:.88rem;font-weight:600;color:var(--text);margin-bottom:8px">Strategy Editor</div>
           <div style="font-size:.78rem;color:var(--muted);margin-bottom:10px">
-            Write a strategy in JavaScript. It runs in a sandbox — not a security boundary.
+            Write a custom strategy in JavaScript. It runs in a sandbox.
             Use <code>signals(bar)</code> to return buy/sell signals.
           </div>
-          <textarea class="strategy-editor" id="strategy-code" spellcheck="false">// Return an array of signals for the current bar.
+          <textarea class="strategy-editor" id="strategy-code" spellcheck="false">// Return signals for the current bar.
 // bar: { open, high, low, close, epoch, signals }
-// signals is an array of engine outputs for this bar.
 function signals(bar) {
-  // Example: buy when any BLE engine sees a liquidity sweep
   const ble = bar.signals.filter(s => s.engine === 'BLE');
   if (ble.some(s => s.type === 'sweep' && s.direction === 'up')) {
     return [{ side: 'up', strength: 0.8, reason: 'BLE liquidity sweep up' }];
@@ -359,15 +502,24 @@ function signals(bar) {
 }
 </textarea>
           <div style="display:flex;gap:8px;margin-top:10px">
-            <button class="btn btn-primary btn-sm">▶ Run in Sandbox</button>
-            <button class="btn btn-secondary btn-sm">Save Strategy</button>
+            <button class="btn btn-primary btn-sm" id="btn-run-sandbox">
+              <i data-lucide="play"></i> Run in Sandbox
+            </button>
+            <button class="btn btn-secondary btn-sm" id="btn-save-strategy">
+              <i data-lucide="save"></i> Save Strategy
+            </button>
           </div>
+          <div id="sandbox-result" style="margin-top:12px;font-size:.78rem;color:var(--muted)"></div>
         </div>
       </div>
 
+      <!-- RULE BOOK TAB -->
       <div id="lab-tab-rulebook" style="display:none">
         <div class="panel" style="padding:18px">
-          <div class="empty-state"><div class="empty-icon">📏</div>No rules approved yet. Run the scanner and approve a rule to trade it here.</div>
+          <div class="empty-state">
+            <div class="empty-icon-svg"><i data-lucide="book-open"></i></div>
+            No rules approved yet. Run the scanner and approve a rule to trade it here.
+          </div>
         </div>
       </div>
     </div>
@@ -375,7 +527,9 @@ function signals(bar) {
     <!-- ═══ LEARNING ═══════════════════════════════════════════════════════ -->
     <div class="view" id="view-learning">
       <div>
-        <div class="view-title"><span class="view-icon">🤖</span> Learning</div>
+        <div class="view-title">
+          <i data-lucide="bot" class="view-icon-lucide"></i> Learning
+        </div>
         <div class="view-subtitle">ML engine proposals — approve a rule to trade it on paper</div>
       </div>
 
@@ -391,23 +545,29 @@ function signals(bar) {
         <div style="font-size:.78rem;color:var(--muted);line-height:1.6">
           The scanner needs ≥ 100 closed paper trades (gate D13) before it can propose a rule.
           Once a rule is proposed, type <code style="background:var(--surface3);padding:1px 5px;border-radius:3px">APPROVE &lt;id&gt;</code> in the box below to trade it on paper.
-          Rules are never traded live automatically — only on paper, and only after 100 trades.
         </div>
         <div style="display:flex;gap:8px;margin-top:12px">
           <input class="form-input" id="approve-input" placeholder="APPROVE <rule-id>" style="flex:1;font-family:var(--font-mono);font-size:.8rem">
-          <button class="btn btn-primary btn-sm" id="btn-approve">Approve</button>
+          <button class="btn btn-primary btn-sm" id="btn-approve">
+            <i data-lucide="check-circle"></i> Approve
+          </button>
         </div>
       </div>
 
       <div class="proposals-list" id="proposals-list">
-        <div class="empty-state"><div class="empty-icon">🤖</div>No proposals yet. The bot needs 100 paper trades first.</div>
+        <div class="empty-state">
+          <div class="empty-icon-svg"><i data-lucide="bot"></i></div>
+          No proposals yet. The bot needs 100 paper trades first.
+        </div>
       </div>
     </div>
 
     <!-- ═══ BROKER ══════════════════════════════════════════════════════════ -->
     <div class="view" id="view-broker">
       <div>
-        <div class="view-title"><span class="view-icon">🔗</span> Broker Connection</div>
+        <div class="view-title">
+          <i data-lucide="plug" class="view-icon-lucide"></i> Broker Connection
+        </div>
         <div class="view-subtitle">Connect to your Deriv account — demo first, real money locked</div>
       </div>
 
@@ -415,21 +575,21 @@ function signals(bar) {
       <div class="broker-panel">
         <div>
           <div style="font-size:.85rem;font-weight:600;color:var(--text);margin-bottom:4px">Trading Mode</div>
-          <div style="font-size:.75rem;color:var(--muted)">Choose how the bot places orders. Demo uses a Deriv virtual account with fake money.</div>
+          <div style="font-size:.75rem;color:var(--muted)">Choose how the bot places orders.</div>
         </div>
         <div class="broker-mode-select">
           <div class="mode-card active paper" data-mode="paper">
-            <div class="mode-icon">📄</div>
+            <div class="mode-icon-lucide"><i data-lucide="file-text"></i></div>
             <div class="mode-label">Paper</div>
-            <div class="mode-desc">No network, no account, no risk. All trades are simulated.</div>
+            <div class="mode-desc">No network, no account, no risk. All trades simulated.</div>
           </div>
           <div class="mode-card" data-mode="demo">
-            <div class="mode-icon">🧪</div>
+            <div class="mode-icon-lucide"><i data-lucide="flask-conical"></i></div>
             <div class="mode-label">Demo</div>
-            <div class="mode-desc">Deriv virtual account. Real prices, fake money. Owner must unlock.</div>
+            <div class="mode-desc">Deriv virtual account. Real prices, fake money.</div>
           </div>
-          <div class="mode-card" data-mode="real" style="opacity:.6">
-            <div class="mode-icon">🔒</div>
+          <div class="mode-card" data-mode="real" style="opacity:.6;cursor:not-allowed">
+            <div class="mode-icon-lucide"><i data-lucide="lock"></i></div>
             <div class="mode-label">Real</div>
             <div class="mode-desc">Real money. <span class="mode-locked">LOCKED — written approval required.</span></div>
           </div>
@@ -441,70 +601,72 @@ function signals(bar) {
           <div class="form-row">
             <label class="form-label">Deriv API Token</label>
             <div class="token-input-row">
-              <input class="form-input" id="broker-token" type="password" placeholder="Your Deriv API token" autocomplete="off">
-              <button class="btn btn-secondary btn-sm" onclick="$('#broker-token').type==='password'?$('#broker-token').type='text':$('#broker-token').type='password'">👁</button>
+              <input class="form-input" id="broker-token" type="password" placeholder="Your Deriv API token (VIRTUAL account)" autocomplete="off">
+              <button class="btn btn-secondary btn-sm" id="btn-toggle-token" aria-label="Show/hide token">
+                <i data-lucide="eye"></i>
+              </button>
             </div>
-            <div class="form-hint" id="token-hint">Use a VIRTUAL account token for demo mode.</div>
+            <div class="form-hint" id="token-hint">Use a VIRTUAL account token from app.deriv.com → Manage tokens.</div>
           </div>
-          <div style="display:flex;gap:8px;margin-top:4px">
-            <button class="btn btn-primary btn-sm" id="btn-connect">Connect</button>
-            <button class="btn btn-secondary btn-sm" id="btn-disconnect">Disconnect</button>
-          </div>
-        </div>
-
-        <!-- Risk info -->
-        <div style="background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.2);border-radius:var(--radius);padding:14px">
-          <div style="font-size:.8rem;font-weight:600;color:var(--warn);margin-bottom:8px">⚠️ Risk &amp; Limits</div>
-          <div style="font-size:.75rem;color:var(--muted2);line-height:1.6">
-            • The bot can use <strong style="color:var(--text)">at most $5 of balance</strong>. This is a hard limit.<br>
-            • Demo mode is locked until the owner enables it in settings.<br>
-            • Real money is locked until the owner explicitly unlocks it in writing.<br>
-            • The token is session-only — cleared when you close the tab.<br>
-            • No profit is guaranteed. You can lose every stake.
+          <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+            <button class="btn btn-primary btn-sm" id="btn-connect">
+              <i data-lucide="plug"></i> Connect
+            </button>
+            <button class="btn btn-secondary btn-sm" id="btn-disconnect">
+              <i data-lucide="plug-2"></i> Disconnect
+            </button>
+            <span class="scanner-status" id="connect-status"></span>
           </div>
         </div>
       </div>
 
       <!-- Account info panel (shown when connected) -->
       <div class="panel" id="account-info-panel" style="display:none;padding:16px">
-        <div style="font-size:.85rem;font-weight:600;color:var(--text);margin-bottom:12px">Account</div>
+        <div style="font-size:.85rem;font-weight:600;color:var(--text);margin-bottom:12px">Connected Account</div>
         <div class="form-grid" style="gap:10px">
           <div><div class="form-label">Login ID</div><div style="font-family:var(--font-mono);font-size:.85rem;color:var(--text)" id="acct-loginid">—</div></div>
           <div><div class="form-label">Account type</div><div id="acct-type">—</div></div>
           <div><div class="form-label">Balance</div><div style="font-family:var(--font-mono);font-size:.85rem;color:var(--buy)" id="acct-balance">—</div></div>
           <div><div class="form-label">Currency</div><div id="acct-currency">—</div></div>
         </div>
+        <button class="btn btn-secondary btn-sm" id="btn-refresh-balance" style="margin-top:12px">
+          <i data-lucide="refresh-cw"></i> Refresh Balance
+        </button>
       </div>
     </div>
 
     <!-- ═══ SETTINGS ═══════════════════════════════════════════════════════ -->
     <div class="view" id="view-settings">
       <div>
-        <div class="view-title"><span class="view-icon">⚙</span> Settings</div>
+        <div class="view-title">
+          <i data-lucide="settings-2" class="view-icon-lucide"></i> Settings
+        </div>
         <div class="view-subtitle">Schema-driven configuration — 300+ options</div>
       </div>
 
       <div class="settings-search">
-        <span style="color:var(--muted)">🔍</span>
+        <i data-lucide="search" style="width:16px;height:16px;color:var(--muted);flex-shrink:0"></i>
         <input type="text" id="settings-search-input" placeholder="Search settings…">
       </div>
 
       <div class="settings-grid" id="settings-grid">
-        <!-- Quick settings -->
         <div class="setting-row">
           <div class="setting-info">
             <div class="setting-key">risk.riskPct</div>
             <div class="setting-desc">Risk per trade (% of usable balance)</div>
           </div>
           <div class="setting-control">
-            <input class="form-input" style="width:80px" type="number" value="1" min="0.1" max="2" step="0.1">
+            <input class="form-input" style="width:80px" type="number" value="1" min="0.1" max="2" step="0.1" data-path="risk.riskPct">
           </div>
         </div>
         <div class="setting-row">
           <div class="setting-info">
             <div class="setting-key">risk.usableCapUsd</div>
             <div class="setting-desc">Maximum usable balance in USD</div>
-            <div class="setting-locked">🔒 Locked at $5. Only the owner can raise this.</div>
+            <div class="setting-locked">
+              <i data-lucide="lock" style="width:12px;height:12px;display:inline;vertical-align:middle"></i>
+              Locked at $5. Only the owner can raise this.
+            </div>
           </div>
           <div class="setting-control">
             <input class="form-input" style="width:80px" type="number" value="5" disabled>
@@ -513,15 +675,14 @@ function signals(bar) {
         <div class="setting-row">
           <div class="setting-info">
             <div class="setting-key">data.simSpeed</div>
-            <div class="setting-desc">Simulation speed (bars per second of real time)</div>
+            <div class="setting-desc">Simulation speed (bars per second)</div>
           </div>
           <div class="setting-control">
-            <select class="form-select" style="width:120px">
+            <select class="form-select" style="width:120px" data-path="data.simSpeed">
               <option value="1">1×</option>
               <option value="10">10×</option>
               <option value="60" selected>60×</option>
               <option value="600">600×</option>
-              <option value="max">Max</option>
             </select>
           </div>
         </div>
@@ -532,7 +693,7 @@ function signals(bar) {
           </div>
           <div class="setting-control">
             <label class="setting-toggle">
-              <input type="checkbox" checked>
+              <input type="checkbox" checked data-path="store.persist">
               <span class="toggle-track"></span>
             </label>
           </div>
@@ -543,27 +704,29 @@ function signals(bar) {
             <div class="setting-desc">Assets the bot monitors and trades</div>
           </div>
           <div class="setting-control">
-            <input class="form-input" style="width:160px" type="text" value="R_100">
-          </div>
-        </div>
-        <div class="setting-row" style="border-color:rgba(239,68,68,.3)">
-          <div class="setting-info">
-            <div class="setting-key">risk.liveGate</div>
-            <div class="setting-desc">Enable real-money trading</div>
-            <div class="setting-locked">🔒 Owner-only. Must be enabled in writing, not through this UI.</div>
-          </div>
-          <div class="setting-control">
-            <label class="setting-toggle">
-              <input type="checkbox" disabled>
-              <span class="toggle-track"></span>
-            </label>
+            <input class="form-input" style="width:160px" type="text" value="R_100" data-path="engine.tradeAssets">
           </div>
         </div>
         <div class="setting-row">
           <div class="setting-info">
             <div class="setting-key">risk.demoGateway</div>
             <div class="setting-desc">Enable Deriv demo (virtual) account connection</div>
-            <div class="setting-locked">🔒 Owner-only unlock.</div>
+          </div>
+          <div class="setting-control">
+            <label class="setting-toggle">
+              <input type="checkbox" checked data-path="risk.demoGateway">
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+        </div>
+        <div class="setting-row" style="border-color:rgba(239,68,68,.3)">
+          <div class="setting-info">
+            <div class="setting-key">risk.liveGate</div>
+            <div class="setting-desc">Enable real-money trading</div>
+            <div class="setting-locked">
+              <i data-lucide="lock" style="width:12px;height:12px;display:inline;vertical-align:middle"></i>
+              Owner-only. Must be enabled in writing, not through this UI.
+            </div>
           </div>
           <div class="setting-control">
             <label class="setting-toggle">
@@ -575,16 +738,24 @@ function signals(bar) {
       </div>
 
       <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn btn-secondary btn-sm" id="btn-export">📤 Export Settings</button>
-        <button class="btn btn-secondary btn-sm" id="btn-import">📥 Import Settings</button>
-        <button class="btn btn-danger btn-sm" id="btn-wipe">🗑 Wipe All Data</button>
+        <button class="btn btn-secondary btn-sm" id="btn-export">
+          <i data-lucide="upload"></i> Export Settings
+        </button>
+        <button class="btn btn-secondary btn-sm" id="btn-import">
+          <i data-lucide="download"></i> Import Settings
+        </button>
+        <button class="btn btn-danger btn-sm" id="btn-wipe">
+          <i data-lucide="trash-2"></i> Wipe All Data
+        </button>
       </div>
     </div>
 
-    <!-- ═══ ABOUT & RISK ════════════════════════════════════════════════════ -->
+    <!-- ═══ ABOUT ══════════════════════════════════════════════════════════ -->
     <div class="view" id="view-about">
       <div>
-        <div class="view-title"><span class="view-icon">ℹ</span> About &amp; Risk</div>
+        <div class="view-title">
+          <i data-lucide="info" class="view-icon-lucide"></i> About &amp; Risk
+        </div>
         <div class="view-subtitle">Honest limits, engine test results, and decision log</div>
       </div>
 
@@ -602,9 +773,8 @@ function signals(bar) {
           </div>
         </div>
         <div style="font-size:.78rem;color:var(--muted2);line-height:1.6;padding:12px;background:var(--surface2);border-radius:var(--radius)">
-          SimpleXEngine is a beta. It learns from the market data and trades it sees on this device,
-          so the more you use it here, the more data it learns from.
-          <strong style="color:var(--text)">Nothing is guaranteed: no forecast or method wins every time, and you can lose the stake.</strong>
+          SimpleXEngine is a beta. It learns from the market data and trades it sees on this device.
+          <strong style="color:var(--warn)">Trading involves risk. No forecast or method wins every time, and you can lose the stake. This is not financial advice.</strong>
         </div>
       </div>
 
@@ -633,7 +803,7 @@ function signals(bar) {
         <div><strong style="color:var(--muted2)">Engines</strong> — BLE, BDE, SLE, SRE, OBE, FVG, MSE, CDE, SRD, BSL, QAE, LSE, PDE, BRL</div>
         <div><strong style="color:var(--muted2)">Learning</strong> — LearningLoop · Scanner (BH-FDR, 16,407 conditions tested) · RuleBook</div>
         <div><strong style="color:var(--muted2)">Storage</strong> — IndexedDB (consent gated) · localStorage (settings) · No server</div>
-        <div><strong style="color:var(--muted2)">Token</strong> — sessionStorage only, never persisted (D2)</div>
+        <div><strong style="color:var(--muted2)">Token</strong> — session memory only, never persisted (D2)</div>
       </div>
     </div>
 
@@ -648,7 +818,7 @@ document.addEventListener('DOMContentLoaded', () => {
     btn.addEventListener('click', () => {
       const tab = btn.dataset.tab;
       document.querySelectorAll('.tab[data-tab]').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
-      ['backtest','scanner','editor','rulebook'].forEach(t => {
+      ['backtest','tradetest','scanner','editor','rulebook'].forEach(t => {
         const el = document.getElementById(`lab-tab-${t}`);
         if (el) el.style.display = t === tab ? '' : 'none';
       });

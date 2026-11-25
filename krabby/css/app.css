@@ -632,3 +632,107 @@ input, select, textarea { font-family: var(--font); }
 
 /* ── Gradient rule ────────────────────────────────────────────────────────── */
 .hr { border: none; height: 1px; background: var(--border); margin: 8px 0; }
+
+/* ── Lucide icons global sizing ──────────────────────────────────────────── */
+/* Icons inherit size from their container's CSS; set explicit defaults here. */
+i[data-lucide] {
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0; width: 16px; height: 16px;
+  vertical-align: middle; line-height: 1;
+  pointer-events: none;
+}
+/* Nav sidebar icons */
+.nav-icon { width: 16px; height: 16px; }
+.nav-icon svg { width: 16px; height: 16px; }
+.nav-item .nav-icon { flex-shrink: 0; display: flex; align-items: center; }
+
+/* View title icons (larger) */
+.view-icon-lucide { width: 22px; height: 22px; }
+.view-icon-lucide svg { width: 22px; height: 22px; }
+
+/* Topbar icons */
+.icon-btn i[data-lucide] { width: 16px; height: 16px; }
+.icon-btn i[data-lucide] svg { width: 16px; height: 16px; }
+
+/* Mode bar icon */
+.mode-bar-icon { width: 14px; height: 14px; }
+.mode-bar-icon svg { width: 14px; height: 14px; }
+
+/* Mode card icons (large) */
+.mode-icon-lucide {
+  width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
+  color: var(--muted2);
+}
+.mode-icon-lucide i[data-lucide], .mode-icon-lucide svg { width: 28px; height: 28px; }
+.mode-card.active.paper  .mode-icon-lucide { color: var(--muted2); }
+.mode-card.active.demo   .mode-icon-lucide { color: #60a5fa; }
+.mode-card.active.real   .mode-icon-lucide { color: #f87171; }
+
+/* Empty state svg icons (medium-large) */
+.empty-icon-svg {
+  font-size: 0; display: flex; align-items: center; justify-content: center;
+  margin: 0 auto 10px; opacity: 0.35; width: 36px; height: 36px;
+}
+.empty-icon-svg i[data-lucide] { width: 36px; height: 36px; }
+.empty-icon-svg svg { width: 36px; height: 36px; }
+
+/* Button icons inline */
+.btn i[data-lucide] { width: 14px; height: 14px; flex-shrink: 0; }
+.btn i[data-lucide] svg { width: 14px; height: 14px; }
+.btn-xs i[data-lucide] { width: 12px; height: 12px; }
+
+/* ── Improved run indicator ──────────────────────────────────────────────── */
+.run-indicator { gap: 6px; }
+
+/* ── Improved view layout ────────────────────────────────────────────────── */
+.view.active { display: flex; flex-direction: column; gap: 16px; }
+
+/* ── Improved view title ─────────────────────────────────────────────────── */
+.view-title { align-items: center; }
+
+/* ── Live price source badge ──────────────────────────────────────────────── */
+.live-source-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: 20px; font-size: 0.65rem; font-weight: 600;
+  background: rgba(34,197,94,0.15); color: #4ade80;
+  animation: live-pulse 2s ease-in-out infinite;
+}
+@keyframes live-pulse { 0%,100%{opacity:1} 50%{opacity:.6} }
+
+/* ── Trade test results panel ─────────────────────────────────────────────── */
+.tt-result-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px; margin-top: 12px;
+}
+.tt-stat { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; }
+.tt-stat-label { font-size: 0.65rem; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 4px; }
+.tt-stat-value { font-family: var(--font-mono); font-size: 1.1rem; font-weight: 700; color: var(--text); }
+.tt-stat-value.up { color: var(--buy); }
+.tt-stat-value.down { color: var(--sell); }
+.tt-stat-value.accent { color: var(--accent); }
+
+/* ── Trade sequence bar ───────────────────────────────────────────────────── */
+.trade-sequence { display: flex; gap: 2px; flex-wrap: wrap; margin-top: 12px; }
+.trade-seq-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.trade-seq-dot.win  { background: var(--buy); }
+.trade-seq-dot.loss { background: var(--sell); }
+
+/* ── Comparison chip ──────────────────────────────────────────────────────── */
+.compare-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px; background: var(--surface2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); font-size: 0.72rem; color: var(--muted2);
+  margin: 4px;
+}
+.compare-chip.better { border-color: rgba(34,197,94,.4); color: var(--buy); }
+.compare-chip.worse  { border-color: rgba(239,68,68,.4); color: var(--sell); }
+
+/* ─── Global utility classes (used by dynamic JS-injected HTML) ─────────────── */
+.mono  { font-family: var(--font-mono); }
+.muted { color: var(--muted); }
+.up    { color: var(--buy); }
+.down  { color: var(--sell); }
+.accent{ color: var(--accent); }
+.mb-16 { margin-bottom: 16px; }
+.mb-8  { margin-bottom: 8px; }
+.mb-4  { margin-bottom: 4px; }

@@ -284,6 +284,7 @@ int('risk.newsBefore', 'News blackout: minutes before an event', 10, 0, 120, 1);
 int('risk.newsAfter', 'News blackout: minutes after an event', 10, 0, 120, 1);
 json('risk.newsEvents', 'News events (JSON list of {at, title})', [], { help: 'Entered by hand (D7). No automatic calendar yet.' });
 bool('risk.noLimitDailyStop', 'Turn off the daily loss stop for manual trades', false, { confirm: 'NO LIMIT', help: 'D6: manual trades only, behind a typed confirmation. The bot always keeps the stop.' });
+bool('risk.demoGateway', 'Enable Deriv demo (virtual) account connection', true, { help: 'Default on. Allows connecting a Deriv VIRTUAL (VR) token for demo trading with real prices and fake money.' });
 num('risk.multiplier', 'Multiplier for sizing', 100, 1, 2000, 1, { help: 'Deriv offers fixed multipliers per market; the allowed list is read from quotes (Probe 6).' });
 json('risk.multiplierOverrides', 'Multiplier by market (JSON)', {}, { help: 'Example: {"frxXAUUSD": 100}. Empty uses the default above.' });
 
