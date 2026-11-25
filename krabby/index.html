@@ -13,8 +13,8 @@
   <link rel="stylesheet" href="css/app.css">
   <!-- Lightweight Charts must load BEFORE the ES module -->
   <script src="vendor/lightweight-charts.standalone.production.js"></script>
-  <!-- Lucide icons -->
-  <script src="https://unpkg.com/lucide@0.263.1/dist/umd/lucide.min.js"></script>
+  <!-- Lucide icons — vendored, no CDN dependency -->
+  <script src="vendor/icons.js"></script>
 </head>
 <body>
 
@@ -265,40 +265,57 @@
 
     <!-- ═══ CHART ═══════════════════════════════════════════════════════════ -->
     <div class="view" id="view-chart">
-      <div>
-        <div class="view-title">
-          <i data-lucide="trending-up" class="view-icon-lucide"></i> Chart
-        </div>
-        <div class="view-subtitle">Candlestick chart — Lightweight Charts™ · real Deriv prices</div>
-      </div>
-      <div class="chart-panel" style="min-height:460px">
+      <div class="chart-terminal">
+
+        <!-- ── Toolbar: symbol name · type tabs · tf tabs · asset select ── -->
         <div class="chart-toolbar">
-          <span class="chart-title" id="chart-asset-label">R_100 — Volatility 100 Index</span>
-          <div class="tf-tabs">
-            <button class="tf-tab active" data-tf="60">1m</button>
-            <button class="tf-tab" data-tf="300">5m</button>
-            <button class="tf-tab" data-tf="900">15m</button>
-            <button class="tf-tab" data-tf="3600">1H</button>
-            <button class="tf-tab" data-tf="14400">4H</button>
-            <button class="tf-tab" data-tf="86400">1D</button>
+          <div class="chart-toolbar-left">
+            <span class="chart-asset-label" id="chart-asset-label">R_100 — Volatility 100 Index</span>
+            <div class="ct-tabs" id="chart-type-tabs">
+              <button class="ct-tab active" data-type="candlestick" title="Candlestick">Candles</button>
+              <button class="ct-tab" data-type="bars"        title="OHLC Bars">OHLC</button>
+              <button class="ct-tab" data-type="line"        title="Line chart">Line</button>
+              <button class="ct-tab" data-type="area"        title="Area chart">Area</button>
+              <button class="ct-tab" data-type="baseline"    title="Baseline chart">Base</button>
+            </div>
           </div>
-          <div style="display:flex;gap:6px;margin-left:auto">
-            <select class="form-select" id="chart-symbol-select" style="width:160px;font-size:.75rem;padding:4px 8px">
+          <div class="chart-toolbar-right">
+            <div class="tf-tabs">
+              <button class="tf-tab active" data-tf="1m">1m</button>
+              <button class="tf-tab" data-tf="5m">5m</button>
+              <button class="tf-tab" data-tf="15m">15m</button>
+              <button class="tf-tab" data-tf="30m">30m</button>
+              <button class="tf-tab" data-tf="1h">1H</button>
+              <button class="tf-tab" data-tf="4h">4H</button>
+              <button class="tf-tab" data-tf="1d">1D</button>
+            </div>
+            <select class="form-select chart-sym-select" id="chart-symbol-select">
               <option value="R_100">R_100 — Vol 100</option>
               <option value="R_50">R_50 — Vol 50</option>
               <option value="R_75">R_75 — Vol 75</option>
+              <option value="1HZ100V">Vol 100 (1s)</option>
               <option value="frxXAUUSD">XAU/USD — Gold</option>
               <option value="cryBTCUSD">BTC/USD — Bitcoin</option>
               <option value="frxEURUSD">EUR/USD</option>
+              <option value="frxGBPUSD">GBP/USD</option>
             </select>
-            <button class="btn btn-secondary btn-xs" id="chart-load-history">
-              <i data-lucide="refresh-cw"></i> Refresh
-            </button>
           </div>
         </div>
+
+        <!-- ── OHLCV info bar ──────────────────────────────────────────── -->
+        <div class="chart-ohlcv-bar">
+          <div class="ohlcv-data" id="chart-ohlcv"></div>
+          <div class="chart-feed-status" id="chart-feed-status">
+            <span class="chart-feed-dot"></span>
+            <span id="chart-feed-label">connecting…</span>
+          </div>
+        </div>
+
+        <!-- ── Main chart canvas ──────────────────────────────────────── -->
         <div class="chart-area">
           <div id="main-chart"></div>
         </div>
+
       </div>
     </div>
 

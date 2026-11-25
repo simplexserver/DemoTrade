@@ -182,7 +182,7 @@ function pushTick(sym, price) {
   if (hist.length > 120) hist.shift();
   const m = MARKETS.find((x) => x.symbol === sym);
   if (m) updatePriceTicker(m);
-  // Feed chart if viewing this symbol
+  // Feed chart live ticks when viewing this symbol (auto-aggregated by chart.js)
   if (_currentSymbol === sym && _currentView === 'chart') {
     const chart = getMainChart();
     if (chart) chart.addTick({ time: Math.floor(Date.now() / 1000), price });
@@ -227,9 +227,12 @@ async function startDerivPublicFeed() {
         _usingRealPrices = true;
         if (sub) sub.textContent = `${MARKETS.length}+ markets — live Deriv prices`;
         subscribeVisibleSymbols();
+        // Auto-refresh chart if it's already open
+        if (_currentView === 'chart') loadChartData(_currentSymbol, _currentTf);
       } else if (status === 'closed' || status === 'error') {
         _usingRealPrices = false;
         if (sub) sub.textContent = `${MARKETS.length}+ markets — simulated prices (Deriv offline)`;
+        setChartFeedStatus('sim');
       }
     });
     await derivConnect();
@@ -682,8 +685,20 @@ function showAccountInfo(acct) {
 
 // ─── Chart view ───────────────────────────────────────────────────────────────
 let _currentSymbol = 'R_100';
-let _currentTf = 60;
+let _currentTf = '1m';          // string key ('1m','5m','15m','30m','1h','4h','1d')
+let _currentChartType = 'candlestick';
 let _chartInited = false;
+let _chartCandleUnsub = null;   // cleanup fn for active candle subscription
+
+const TF_TO_SECS = { '1m': 60, '5m': 300, '15m': 900, '30m': 1800, '1h': 3600, '4h': 14400, '1d': 86400, '1w': 604800 };
+
+function setChartFeedStatus(mode) {
+  const el = $('#chart-feed-status');
+  const lbl = $('#chart-feed-label');
+  if (!el) return;
+  el.className = `chart-feed-status ${mode}`;
+  if (lbl) lbl.textContent = mode === 'live' ? 'Live · Deriv' : mode === 'sim' ? 'Simulated' : 'connecting…';
+}
 
 async function initChartView() {
   const chart = getMainChart();
@@ -694,78 +709,100 @@ async function initChartView() {
 
   if (!_chartInited) {
     _chartInited = true;
+
     // Wire timeframe tabs
     $$('.tf-tab').forEach((btn) => {
       btn.addEventListener('click', () => {
         $$('.tf-tab').forEach((b) => b.classList.remove('active'));
         btn.classList.add('active');
-        _currentTf = parseInt(btn.dataset.tf, 10);
+        _currentTf = btn.dataset.tf;
+        chart.setTimeframe(_currentTf);
         loadChartData(_currentSymbol, _currentTf);
       });
     });
+
+    // Wire chart-type tabs
+    $$('.ct-tab').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        $$('.ct-tab').forEach((b) => b.classList.remove('active'));
+        btn.classList.add('active');
+        _currentChartType = btn.dataset.type;
+        chart.setType(_currentChartType);
+      });
+    });
+
     // Wire symbol select
     $('#chart-symbol-select')?.addEventListener('change', (e) => {
       _currentSymbol = e.target.value;
       const mkt = MARKETS.find((m) => m.symbol === _currentSymbol);
       const lbl = $('#chart-asset-label');
       if (lbl) lbl.textContent = mkt ? `${mkt.symbol} — ${mkt.label}` : _currentSymbol;
-      loadChartData(_currentSymbol, _currentTf);
-    });
-    // Refresh button
-    $('#chart-load-history')?.addEventListener('click', () => {
+      chart.setSymbol(_currentSymbol, mkt?.label || _currentSymbol);
       loadChartData(_currentSymbol, _currentTf);
     });
   }
 
-  // Set symbol
+  // Set symbol on chart instance
   const mkt = MARKETS.find((m) => m.symbol === _currentSymbol);
   chart.setSymbol(_currentSymbol, mkt?.label || _currentSymbol);
   const lbl = $('#chart-asset-label');
   if (lbl) lbl.textContent = mkt ? `${mkt.symbol} — ${mkt.label}` : _currentSymbol;
 
+  setChartFeedStatus('');
   loadChartData(_currentSymbol, _currentTf);
 }
 
-async function loadChartData(symbol, granularity) {
+async function loadChartData(symbol, tf) {
   const chart = getMainChart();
   if (!chart) return;
 
+  const granularity = TF_TO_SECS[tf] || 60;
   const lbl = $('#chart-asset-label');
+
+  // Cancel any existing candle subscription
+  if (_chartCandleUnsub) {
+    try { _chartCandleUnsub(); } catch (_) {}
+    _chartCandleUnsub = null;
+  }
 
   if (derivIsConnected()) {
     try {
+      setChartFeedStatus('');
       if (lbl) lbl.textContent = `${symbol} — loading…`;
       const bars = await getCandles(symbol, granularity, 500);
+      // Guard: user may have changed symbol/tf while awaiting
+      if (_currentSymbol !== symbol || _currentTf !== tf) return;
       chart.setBars(bars);
       const mkt = MARKETS.find((m) => m.symbol === symbol);
       if (lbl) lbl.textContent = mkt ? `${mkt.symbol} — ${mkt.label}` : symbol;
-      // Subscribe to real-time candle updates
-      subscribeCandles(symbol, granularity, 300, (candle) => {
-        if (_currentSymbol === symbol && _currentTf === granularity) {
-          chart.addBar({
-            time: Math.floor(candle.time / 1000),
-            open: candle.open, high: candle.high, low: candle.low, close: candle.close,
-          });
-        }
-      }).catch(() => {});
+      setChartFeedStatus('live');
+      // Auto-subscribe to real-time candle updates (no manual refresh needed)
+      _chartCandleUnsub = await subscribeCandles(symbol, granularity, 300, (candle) => {
+        if (_currentSymbol !== symbol || _currentTf !== tf) return;
+        chart.addBar({
+          time: candle.epoch || Math.floor((candle.time || Date.now()) / 1000),
+          open: candle.open, high: candle.high, low: candle.low, close: candle.close,
+        });
+      }).catch(() => null);
     } catch (e) {
-      if (lbl) {
-        const mkt = MARKETS.find((m) => m.symbol === symbol);
-        lbl.textContent = mkt ? `${mkt.symbol} — ${mkt.label} (sim)` : symbol;
-      }
-      loadSimHistory(chart, symbol);
+      const mkt = MARKETS.find((m) => m.symbol === symbol);
+      if (lbl) lbl.textContent = mkt ? `${mkt.symbol} — ${mkt.label}` : symbol;
+      setChartFeedStatus('sim');
+      loadSimHistory(chart, symbol, tf);
     }
   } else {
-    loadSimHistory(chart, symbol);
+    setChartFeedStatus('sim');
+    loadSimHistory(chart, symbol, tf);
   }
 }
 
-function loadSimHistory(chart, symbol) {
+function loadSimHistory(chart, symbol, tf) {
+  const tfSec = TF_TO_SECS[tf] || 60;
   const hist = _priceHistory[symbol] || [];
   if (hist.length > 1) {
     const now = Math.floor(Date.now() / 1000);
     const bars = hist.map((price, i) => {
-      const t = now - (hist.length - 1 - i) * _currentTf;
+      const t = now - (hist.length - 1 - i) * tfSec;
       return { time: t, open: price, high: price * 1.0005, low: price * 0.9995, close: price };
     });
     chart.setBars(bars);

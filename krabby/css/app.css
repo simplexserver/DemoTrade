@@ -205,7 +205,10 @@ input, select, textarea { font-family: var(--font); }
 
 /* ── View headings ────────────────────────────────────────────────────────── */
 .view { display: none; }
+/* Most views: children flow directly into .main's flex column */
 .view.active { display: contents; }
+/* Chart view special case: flex item so it can fill remaining height */
+#view-chart.active { display: flex !important; }
 .view-title {
   font-size: 1.3rem; font-weight: 700; letter-spacing: -0.02em;
   display: flex; align-items: center; gap: 10px; color: var(--text);
@@ -249,16 +252,50 @@ input, select, textarea { font-family: var(--font); }
   100% { opacity: 1; transform: scale(1); }
 }
 
-/* ── Chart container ──────────────────────────────────────────────────────── */
-.chart-panel {
-  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-  display: flex; flex-direction: column; overflow: hidden;
+/* ── Chart terminal (full-height view) ────────────────────────────────────── */
+
+/* Chart view fills its main column entirely */
+#view-chart.active {
+  display: flex; flex-direction: column; flex: 1; min-height: 0;
 }
+.chart-terminal {
+  flex: 1; display: flex; flex-direction: column; min-height: 0;
+  background: #0b0f17; border: 1px solid var(--border);
+  border-radius: var(--radius); overflow: hidden;
+}
+
+/* Toolbar — two-sided layout */
 .chart-toolbar {
-  display: flex; align-items: center; gap: 8px; padding: 10px 14px;
-  border-bottom: 1px solid var(--border); flex-wrap: wrap;
+  display: flex; align-items: center; gap: 8px; padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface); flex-wrap: wrap; gap: 8px;
 }
-.chart-title { font-size: 0.85rem; font-weight: 600; color: var(--text); flex: 1; }
+.chart-toolbar-left {
+  display: flex; align-items: center; gap: 10px; flex: 1; flex-wrap: wrap; min-width: 0;
+}
+.chart-toolbar-right {
+  display: flex; align-items: center; gap: 6px; flex-shrink: 0; flex-wrap: wrap;
+}
+
+/* Asset label */
+.chart-asset-label {
+  font-size: 0.88rem; font-weight: 600; color: var(--text); white-space: nowrap;
+}
+
+/* Chart type tabs (Candles / OHLC / Line / Area / Base) */
+.ct-tabs { display: flex; gap: 2px; }
+.ct-tab {
+  padding: 3px 9px; border-radius: 4px; font-size: 0.7rem; font-weight: 500;
+  color: var(--muted); background: none; cursor: pointer;
+  border: 1px solid transparent;
+  transition: all var(--transition);
+}
+.ct-tab:hover { color: var(--text); background: var(--surface2); border-color: var(--border); }
+.ct-tab.active {
+  background: var(--surface3); color: var(--text); border-color: var(--border2);
+}
+
+/* Timeframe tabs */
 .tf-tabs { display: flex; gap: 2px; }
 .tf-tab {
   padding: 3px 8px; border-radius: 4px; font-size: 0.72rem; font-weight: 500;
@@ -266,7 +303,64 @@ input, select, textarea { font-family: var(--font); }
   transition: all var(--transition);
 }
 .tf-tab:hover { color: var(--text); background: var(--surface2); }
-.tf-tab.active { background: var(--accent); color: white; }
+.tf-tab.active { background: rgba(20,184,166,0.15); color: var(--accent); font-weight: 600; }
+
+/* Asset selector */
+.chart-sym-select {
+  font-size: 0.75rem; padding: 4px 8px; width: 155px; height: 28px;
+}
+
+/* OHLCV info bar */
+.chart-ohlcv-bar {
+  display: flex; align-items: center; padding: 4px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface2); min-height: 26px; gap: 14px; flex-wrap: wrap;
+}
+.ohlcv-data {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  font-family: var(--font-mono); font-size: 0.72rem;
+}
+.ohlcv-item { display: inline-flex; align-items: center; gap: 3px; }
+.ohlcv-label { color: var(--muted); font-size: 0.65rem; letter-spacing: 0.03em; }
+.ohlcv-value { color: var(--muted2); }
+.ohlcv-value.up   { color: var(--buy); }
+.ohlcv-value.down { color: var(--sell); }
+.ohlcv-change {
+  font-size: 0.72rem; font-weight: 600; padding: 1px 5px;
+  border-radius: 3px;
+}
+.ohlcv-change.up   { color: var(--buy);  background: rgba(34,197,94,0.1); }
+.ohlcv-change.down { color: var(--sell); background: rgba(239,68,68,0.1); }
+
+/* Feed status indicator */
+.chart-feed-status {
+  margin-left: auto; display: flex; align-items: center; gap: 5px;
+  color: var(--muted); font-size: 0.65rem; white-space: nowrap;
+}
+.chart-feed-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--muted); flex-shrink: 0;
+}
+.chart-feed-status.live .chart-feed-dot {
+  background: var(--buy); animation: blink 1.5s ease-in-out infinite;
+}
+.chart-feed-status.sim .chart-feed-dot {
+  background: var(--warn);
+}
+
+/* Chart canvas area — fills remaining height */
+.chart-terminal .chart-area {
+  flex: 1; min-height: 0; position: relative; overflow: hidden;
+}
+.chart-terminal .chart-area #main-chart {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+}
+
+/* Legacy chart-panel (dashboard/broker panels keep their own style) */
+.chart-panel {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  display: flex; flex-direction: column; overflow: hidden;
+}
 .chart-area { flex: 1; min-height: 320px; position: relative; }
 #main-chart { width: 100%; height: 100%; min-height: 320px; }
 
